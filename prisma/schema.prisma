@@ -1,0 +1,112 @@
+// Prisma schema for CandidateMatch AI (Neon Postgres)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // Neon POOLED connection string (used by the app)
+  directUrl = env("DIRECT_URL")   // Neon DIRECT (non-pooled) string (used by prisma migrate)
+}
+
+model User {
+  id         Int         @id @default(autoincrement())
+  google_id  String      @unique
+  email      String      @unique
+  name       String?
+  picture    String?
+  created_at DateTime    @default(now())
+  last_login DateTime    @default(now())
+  jds        Jd[]
+  candidates Candidate[]
+  settings   Setting?
+  activity   ActivityLog[]
+
+  @@map("users")
+}
+
+model Jd {
+  id               Int         @id @default(autoincrement())
+  title            String?
+  client           String?
+  total_exp        Float?
+  relevant_exp     Float?
+  location         String?
+  work_mode        String?
+  employment_type  String?
+  budget           String?
+  current_ctc      String?
+  expected_ctc     String?
+  seniority        String?
+  required_skills  Json        @default("[]")
+  preferred_skills Json        @default("[]")
+  responsibilities Json        @default("[]")
+  technologies     Json        @default("[]")
+  education        Json        @default("[]")
+  certifications   Json        @default("[]")
+  raw_text         String?
+  status           String      @default("draft") // draft | saved
+  created_at       DateTime    @default(now())
+  candidates       Candidate[]
+  user_id          Int?
+  user             User?       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@map("jds")
+}
+
+model Candidate {
+  id          Int      @id @default(autoincrement())
+  file_name   String?
+  resume_text String?
+  jd_id       Int
+  jd          Jd       @relation(fields: [jd_id], references: [id], onDelete: Cascade)
+  name        String?
+  analysis    Json?
+  score       Int?
+  req_hit     Float?
+  req_total   Int?
+  shortlisted Boolean  @default(false)
+  mask_status String   @default("none") // none | masked | failed
+  masked_text String?
+  mask_error  String?
+  created_at  DateTime @default(now())
+  user_id     Int?
+  user        User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([jd_id])
+  @@index([user_id])
+  @@map("candidates")
+}
+
+model Setting {
+  id             Int     @id @default(autoincrement())
+  user_id        Int?    @unique
+  user           User?   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  hide           Json    @default("{}")
+  watermark_text String  @default("XS Associate")
+  min_exp        Float   @default(0)
+  logo_b64       String?
+  logo_type      String?
+
+  @@map("settings")
+}
+
+// Append-only audit trail shown in the Admin Panel. Deliberately NOT linked to jds/candidates,
+// so the history survives when a JD / resume (or all of a user's data) is deleted.
+model ActivityLog {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  action     String   // login | jd_extracted | jd_saved | jd_deleted | resume_analyzed | resume_failed | resume_masked | mask_failed | ...
+  entity     String?  // jd | candidate
+  entity_id  Int?
+  label      String?  // candidate first name / CAND-001 / JD code at the time of the event
+  detail     Json?    // file name, JD title, score, error ...
+  created_at DateTime @default(now())
+
+  @@index([user_id, created_at])
+  @@index([created_at])
+  @@index([action])
+  @@map("activity_logs")
+}

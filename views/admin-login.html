@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>CandidateMatch Admin — Sign in</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f1b2d'/%3E%3Crect x='6' y='13' width='20' height='7' fill='%23f5c518'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f1b2d;font:15px/1.55 "IBM Plex Sans",system-ui,sans-serif;color:#0f1b2d;padding:20px}
+  .box{background:#e8ecf1;border-top:6px solid #f5c518;border-radius:6px;padding:34px 32px;width:100%;max-width:400px;text-align:center}
+  .mark{display:flex;align-items:center;justify-content:center;gap:10px;font:800 22px "Bricolage Grotesque",system-ui,sans-serif;letter-spacing:-.02em}
+  .mark i{width:26px;height:26px;border-radius:5px;background:#0f1b2d;border:2px solid #f5c518;position:relative}
+  .mark i:after{content:"";position:absolute;left:3px;right:3px;top:9px;height:6px;background:#f5c518}
+  h1{margin:18px 0 4px;font:800 26px "Bricolage Grotesque",system-ui,sans-serif;letter-spacing:-.03em}
+  p{margin:0 0 22px;color:#53607a}
+  #g{display:flex;justify-content:center;min-height:44px}
+  #msg{margin:18px 0 0;font-size:13px;color:#53607a;min-height:20px}#msg.bad{color:#b4231a}
+  a{color:#53607a;font-size:12px}
+</style>
+</head><body>
+<div class="box">
+  <div class="mark"><i></i>CandidateMatch</div>
+  <h1>Admin sign-in</h1>
+  <p>Authorised administrators only.</p>
+  <div id="g"></div>
+  <div id="msg"></div>
+</div>
+<script src="/admin-login.js"></script>
+</body></html>
