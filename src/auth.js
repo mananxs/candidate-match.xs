@@ -1,4 +1,3 @@
-```javascript
 // Google sign-in (Gmail + XS Associates Workspace) + signed session cookie.
 import crypto from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
@@ -118,4 +117,3 @@ export async function verifyGmail(credential) {
     picture: p.picture || null
   };
 }
-```
