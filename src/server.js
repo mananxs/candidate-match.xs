@@ -263,3 +263,17 @@ app.get('/api/stats', h(async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`CandidateMatch AI running on http://localhost:${port}`));
+
+// Pre-load the PDF / DOCX parsers and open the DB connection so the FIRST upload after a (re)start is not slow.
+import('pdf-parse/lib/pdf-parse.js').catch(() => {});
+import('mammoth').catch(() => {});
+prisma.$queryRaw`SELECT 1`.catch(() => {});
+
+// Optional (set KEEP_WARM=1 on Render): pings the app + database every 10 min so a free instance / Neon does not fall asleep.
+if (process.env.KEEP_WARM === '1') {
+  const self = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL;
+  setInterval(() => {
+    if (self) fetch(self.replace(/\/$/, '') + '/api/config').catch(() => {});
+    prisma.$queryRaw`SELECT 1`.catch(() => {});
+  }, 10 * 60 * 1000).unref();
+}
