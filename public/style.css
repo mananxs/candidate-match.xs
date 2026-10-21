@@ -160,3 +160,8 @@ dialog{background:#fff;color:var(--ink);border-radius:8px;box-shadow:0 30px 80px
 tr.sel td{background:rgba(245,197,24,.22)}
 input[type=date]{width:100%;margin-top:4px;border:1px solid var(--line);border-radius:5px;padding:9px 12px;background:#fff;color:var(--ink);font:inherit}
 input[type=date]:focus{outline:0;border-color:var(--ink);box-shadow:0 0 0 3px rgba(245,197,24,.55)}
+
+/* save confirmation toast */
+#toast{position:fixed;right:20px;bottom:20px;z-index:100;max-width:360px;padding:12px 16px;border-radius:8px;background:#0f1b2d;color:#fff;font-size:14px;border-left:4px solid #34d399;box-shadow:0 10px 30px rgba(0,0,0,.35);opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .2s,transform .2s}
+#toast.show{opacity:1;transform:none}
+#toast.bad{border-left-color:#fb7185}
