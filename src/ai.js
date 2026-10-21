@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { buildSkills } from './match.js';
 
 /**
@@ -19,7 +20,7 @@ async function post(url, headers, body, { retry429 = true } = {}) {
     if (r.ok) return r.json();
     const msg = await r.text();
     const retryable = (r.status === 429 && retry429) || r.status >= 500;
-    if (retryable && attempt < 3) { await sleep(6000 * (attempt + 1)); continue; } // free-tier rate limits
+    if (retryable && attempt < 3) { await sleep(3000 * (attempt + 1)); continue; } // free-tier rate limits
     throw new AiHttpError(r.status, msg);
   }
 }
@@ -62,14 +63,25 @@ async function geminiPost(url, body) {
   throw new Error('All Gemini API keys have hit their quota. Wait a few minutes (or until tomorrow if the daily limit is used up) or add another key.');
 }
 
+// Gemini 'thinking' adds many seconds per call. 0 = off (fast). Set GEMINI_THINKING_BUDGET=-1 for the model's default dynamic thinking.
+let THINK_BUDGET = process.env.GEMINI_THINKING_BUDGET === undefined || process.env.GEMINI_THINKING_BUDGET === '' ? 0 : Number(process.env.GEMINI_THINKING_BUDGET);
+
 // prompt: string. pdf: optional Buffer (scanned PDFs, native on gemini / anthropic only).
 async function ask(prompt, { max = 4096, json = false, pdf = null } = {}) {
   if (PROVIDER === 'gemini') {
     const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
     const parts = [{ text: prompt }];
     if (pdf) parts.unshift({ inlineData: { mimeType: 'application/pdf', data: pdf.toString('base64') } });
-    const d = await geminiPost(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      { contents: [{ role: 'user', parts }], generationConfig: { maxOutputTokens: Math.max(max, 8192), temperature: 0.1, ...(json ? { responseMimeType: 'application/json' } : {}) } });
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const cfg = { maxOutputTokens: Math.max(max, 8192), temperature: 0.1, ...(json ? { responseMimeType: 'application/json' } : {}) };
+    const body = think => ({ contents: [{ role: 'user', parts }], generationConfig: think === null ? cfg : { ...cfg, thinkingConfig: { thinkingBudget: think } } });
+    let d;
+    try { d = await geminiPost(url, body(THINK_BUDGET)); }
+    catch (e) {                                   // model does not accept the thinking setting -> remember and retry without it
+      if (THINK_BUDGET === null || e.status !== 400 || !/think/i.test(e.body || '')) throw e;
+      THINK_BUDGET = null;
+      d = await geminiPost(url, body(null));
+    }
     const out = (d.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
     if (!out) throw new Error('Gemini returned an empty response' + (d.promptFeedback?.blockReason ? ` (blocked: ${d.promptFeedback.blockReason})` : ''));
     return out;
@@ -132,8 +144,14 @@ ${text.slice(0, 20000)}`);
   return d;
 }
 
+// Same resume + same JD skills -> same answer, so re-runs are instant (small in-memory cache).
+const ANALYSIS_CACHE = new Map();
+const CACHE_MAX = 300;
+
 export async function analyzeResume(jd, text) {
   const skills = buildSkills(jd);
+  const ck = createHash('sha1').update(JSON.stringify(skills)).update('\n').update(text.slice(0, 20000)).digest('hex');
+  if (ANALYSIS_CACHE.has(ck)) return structuredClone(ANALYSIS_CACHE.get(ck));
   const d = await askJson(`You are an expert recruiter / ATS engine. Compare ONE resume against a FIXED list of JD skills.
 The resume text was machine-extracted from a file of arbitrary layout: ignore formatting noise, broken columns, headers and footers.
 For EACH skill decide a status using SEMANTIC understanding, not keyword matching:
@@ -155,6 +173,8 @@ ${text.slice(0, 20000)}`);
     const r = by.get(s.name.toLowerCase());
     return { name: s.name, type: s.type, status: ['matched', 'partial', 'missing'].includes(r?.status) ? r.status : 'missing', evidence: r?.evidence || '' };
   });
+  if (ANALYSIS_CACHE.size >= CACHE_MAX) ANALYSIS_CACHE.delete(ANALYSIS_CACHE.keys().next().value);
+  ANALYSIS_CACHE.set(ck, structuredClone(d));
   return d;
 }
 
