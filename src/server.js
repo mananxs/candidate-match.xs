@@ -137,8 +137,7 @@ app.post('/api/candidates', up.single('file'), h(async (req, res) => {
   if (!req.file) throw bad('No file uploaded.');
   let row;
   try {
-    const settings = await getSettings(req.user.id);
-    const text = await fileToText(req.file);
+    const [settings, text] = await Promise.all([getSettings(req.user.id), fileToText(req.file)]);
     const analysis = await analyzeResume(jd, text);
     analysis.required_years = requiredYears(jd, settings.min_exp);
     const sc = score(analysis, analysis.required_years);
@@ -177,9 +176,11 @@ app.post('/api/candidates/bulk-delete', h(async (req, res) => {
 
 /* ---------------- Masking ---------------- */
 app.post('/api/candidates/:id/mask', h(async (req, res) => {
-  const c = await prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { id: true, name: true, resume_text: true } });
+  const [c, s] = await Promise.all([
+    prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { id: true, name: true, resume_text: true } }),
+    getSettings(req.user.id),
+  ]);
   if (!c) throw bad('Candidate not found', 404);
-  const s = await getSettings(req.user.id);
   let data;
   try {
     const masked = await maskResume(c.resume_text, labelOf(c), s.hide || {});
@@ -201,9 +202,12 @@ app.put('/api/candidates/:id/masked', h(async (req, res) => {   // manual clean-
   res.json({ ok: true });
 }));
 app.get('/api/candidates/:id/masked.pdf', h(async (req, res) => {
-  const c = await prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { id: true, name: true, file_name: true, jd_id: true, masked_text: true } });
+  const [c, s] = await Promise.all([
+    prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { id: true, name: true, file_name: true, jd_id: true, masked_text: true } }),
+    getSettings(req.user.id),
+  ]);
   if (!c?.masked_text) throw bad('Resume has not been masked yet.', 404);
-  const s = await getSettings(req.user.id), wm = req.query.wm !== '0', code = labelOf(c);
+  const wm = req.query.wm !== '0', code = labelOf(c);
   const pdf = await buildPdf(c.masked_text, {
     code, watermark: wm, wmText: s.watermark_text,
     logo: s.logo_b64 ? { buf: Buffer.from(s.logo_b64, 'base64'), type: s.logo_type } : null,
@@ -220,8 +224,8 @@ app.get('/api/settings', h(async (req, res) => {
 }));
 app.put('/api/settings', h(async (req, res) => {
   const { hide, watermark_text, min_exp } = req.body;
-  await getSettings(req.user.id);
-  await prisma.setting.update({ where: { user_id: req.user.id }, data: { hide: hide || {}, watermark_text: watermark_text || '', min_exp: Number(min_exp) || 0 } });
+  const data = { hide: hide || {}, watermark_text: watermark_text || '', min_exp: Number(min_exp) || 0 };
+  await prisma.setting.upsert({ where: { user_id: req.user.id }, update: data, create: { user_id: req.user.id, ...data } });
   logActivity(req.user.id, 'settings_updated');
   res.json({ ok: true });
 }));
