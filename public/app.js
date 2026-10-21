@@ -22,7 +22,7 @@ async function pool(items, n, fn) {
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (next < items.length) { const i = next++; await fn(items[i], i); } }));
 }
 const CONC = 3;
-const fmt = d = new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+const fmt = d => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
 let view = 'dash', JDS = [], CANDS = [], ST = {}, SET = {}, CF = '', SEL = new Set(), pick = null, USER = null;
 let M = { jd: null, missing: [], text: '', files: [], results: [], busy: '', err: '' };
