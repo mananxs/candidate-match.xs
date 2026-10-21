@@ -9,7 +9,20 @@ const api = async (p, o = {}) => {
 };
 const send = (p, body, method = 'POST') => api(p, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const upload = (p, file, extra = {}) => { const fd = new FormData(); fd.append('file', file); Object.entries(extra).forEach(([k, v]) => fd.append(k, v)); return api(p, { method: 'POST', body: fd }); };
-const fmt = d => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+let _toastT;
+function toast(msg, bad) {   // small confirmation message (bottom-right), auto-hides
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+  t.textContent = msg; t.className = 'show' + (bad ? ' bad' : '');
+  clearTimeout(_toastT); _toastT = setTimeout(() => t.classList.remove('show'), 2800);
+}
+// Run fn over items with at most n in flight at once (keeps AI rate limits happy while being ~n x faster).
+async function pool(items, n, fn) {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (next < items.length) { const i = next++; await fn(items[i], i); } }));
+}
+const CONC = 3;
+const fmt = d = new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
 let view = 'dash', JDS = [], CANDS = [], ST = {}, SET = {}, CF = '', SEL = new Set(), pick = null, USER = null;
 let M = { jd: null, missing: [], text: '', files: [], results: [], busy: '', err: '' };
@@ -147,7 +160,7 @@ function V_set() {
   <div class="card" style="margin-top:12px"><b>Watermark logo</b> <span class="meta">(optional – replaces the default XS mark on the watermarked PDF)</span><div class="row">
   ${SET.has_logo ? `<img src="/api/settings/logo?${Date.now()}" style="height:48px;border:1px solid var(--line);border-radius:6px;background:#fff"><button class="dng" data-act="rmlogo">Remove logo</button>` : '<span class="meta">No logo set – the default XS mark + text above is used.</span>'}
   <button class="g2" data-act="uplogo">Upload logo</button><span class="meta">PNG or JPEG, max 1 MB</span></div></div>
-  <div class="row"><button data-act="saveset">Save privacy settings</button></div><p class="meta">Changes apply to newly masked resumes. For existing ones, select them on Processed Resumes and click Reprocess Selected.</p></div>
+  <div class="row"><button data-act="saveset">Save privacy settings</button><span class="tag ok" id="setnote" hidden>✓ Saved</span></div><p class="meta">Changes apply to newly masked resumes. For existing ones, select them on Processed Resumes and click Reprocess Selected.</p></div>
   <div class="card"><h2>Data Retention</h2><p class="meta">Your JDs and candidates are stored in a private workspace that only your account can open, and are never auto-deleted. You can still remove an individual JD or resume at any time. To have all of your data permanently removed, please contact your administrator.</p></div>`;
 }
 
@@ -161,9 +174,12 @@ function draw() {
   drawNav();
   $('#main').innerHTML = { dash: V_dash, match: () => V_match(0), bulk: () => V_match(1), cands: V_cands, proc: V_proc, jds: V_jds, set: V_set }[view]();
 }
+const SWR = new Set(['dash', 'cands', 'proc', 'jds']), LOADED = new Set();   // pages with no editable form fields
 async function go(v) {
   const changed = v !== view; view = v; M.err = '';
-  if (changed) { drawNav(); $('#main').innerHTML = SKEL; }            // instant feedback while data loads
+  const cached = changed && SWR.has(v) && LOADED.has(v);              // seen before: show it instantly, refresh underneath
+  if (cached) draw();
+  else if (changed) { drawNav(); $('#main').innerHTML = SKEL; }       // instant feedback while data loads
   try {
     const jobs = [];                                                  // fetch in parallel (was one after another)
     if (v === 'dash') jobs.push(api('/stats').then(r => ST = r));
@@ -172,8 +188,9 @@ async function go(v) {
     if (v === 'proc') jobs.push(api('/candidates').then(r => { CANDS = r; SEL = new Set([...SEL].filter(i => r.some(c => c.id === i))); }));
     if (v === 'set') jobs.push(api('/settings').then(r => SET = r));
     await Promise.all(jobs);
+    LOADED.add(v);
   } catch (e) { M.err = e.message; }
-  draw();
+  if (view === v) draw();
 }
 const dlg = h => { $('#dlg').innerHTML = h + '<div class="row"><button onclick="$(\'#dlg\').close()">Close</button></div>'; $('#dlg').showModal(); };
 const busy = async (msg, fn) => { M.busy = msg; M.err = ''; draw(); try { await fn(); } catch (e) { M.err = e.message; } M.busy = ''; draw(); };
@@ -182,7 +199,7 @@ const busy = async (msg, fn) => { M.busy = msg; M.err = ''; draw(); try { await 
 async function extractJd(file, text) {
   await busy(file ? `Reading ${file.name} and extracting requirements…` : 'Extracting requirements…', async () => {
     const jd = file ? await upload('/jds/extract', file) : await send('/jds/extract', { text });
-    M.jd = jd; M.missing = missingOf(jd); JDS = await api('/jds');
+    M.jd = jd; M.missing = missingOf(jd); JDS = [{ ...jd, cand_count: 0 }, ...JDS.filter(j => j.id !== jd.id)];
   });
 }
 async function maskOne(id) {
@@ -264,16 +281,16 @@ document.addEventListener('click', async e => {
   if (a === 'uplogo') { pick = 'logo'; $('#fi').multiple = false; $('#fi').accept = '.png,.jpg,.jpeg'; return $('#fi').click(); }
   if (a === 'reset') { M.files = []; M.results = []; M.err = ''; return draw(); }
   if (a === 'extract') { if ((M.text || '').trim().length < 40) { M.err = 'Paste or upload a JD first'; return draw(); } return extractJd(null, M.text); }
-  if (a === 'savejd') return busy('Saving requirements…', async () => { M.jd = await send(`/jds/${M.jd.id}`, collectForm(), 'PUT'); M.missing = []; JDS = await api('/jds'); });
+  if (a === 'savejd') return busy('Saving requirements…', async () => { const jd = await send(`/jds/${M.jd.id}`, collectForm(), 'PUT'); M.jd = jd; M.missing = []; JDS = JDS.map(j => j.id === jd.id ? { ...j, ...jd, cand_count: j.cand_count } : j); });
   if (a === 'analyze') {
     if (!M.jd) { M.err = 'Select or extract a JD first'; return draw(); }
     if (M.jd.status !== 'saved') { M.err = 'Click "Save requirements" first so the JD is locked in.'; return draw(); }
     const files = M.files.filter(f => f.file); M.results = [];
-    for (let i = 0; i < files.length; i++) {
-      M.busy = `Analyzing ${i + 1} of ${files.length}: ${files[i].name}…`; draw();
-      try { M.results.push(await upload('/candidates', files[i].file, { jdId: M.jd.id })); } catch (x) { M.err += `${files[i].name}: ${x.message}  `; }
+    await pool(files, CONC, async (f, i) => {
+      M.busy = `Analyzing ${i + 1} of ${files.length}: ${f.name}…`; draw();
+      try { M.results.push(await upload('/candidates', f.file, { jdId: M.jd.id })); } catch (x) { M.err += `${f.name}: ${x.message}  `; }
       draw();
-    }
+    });
     M.busy = ''; M.files = []; return draw();
   }
   if (a === 'matchjd' || a === 'edjd') { M.jd = await api('/jds/' + id); M.missing = M.jd.status === 'draft' ? missingOf(M.jd) : []; M.results = []; return go('match'); }
@@ -296,7 +313,7 @@ document.addEventListener('click', async e => {
   if (a === 'sel') { e.target.checked ? SEL.add(id) : SEL.delete(id); return draw(); }
   if (a === 'viewc') return dlg(card(CANDS.find(c => c.id === id), 0) + LEG);
   if (a === 'mask') return busy('Masking…', () => maskOne(id));
-  if (a === 'maskSel') return busy('Reprocessing…', async () => { for (const i of [...SEL]) { M.busy = 'Masking ' + (CANDS.find(c => c.id === i)?.label || '') + '…'; draw(); await maskOne(i); } SEL.clear(); });
+  if (a === 'maskSel') return busy('Reprocessing…', async () => { await pool([...SEL], CONC, async i => { M.busy = 'Masking ' + (CANDS.find(c => c.id === i)?.label || '') + '…'; draw(); await maskOne(i); }); SEL.clear(); });
   if (a === 'preview') return openPreview(id);
   if (a === 'rmall') {
     const t = $('#rm').value.trim(); if (!t) return;
@@ -306,7 +323,16 @@ document.addEventListener('click', async e => {
   if (a === 'msave') { await send(`/candidates/${id}/masked`, { text: $('#mt').value }, 'PUT'); window._cmp.saved = $('#mt').value; if (!$('#cmpwrap').hidden) drawCompare(); $('#pv').src = `/api/candidates/${id}/masked.pdf?wm=1&t=${Date.now()}`; return; }
   if (a === 'saveset') {
     const hide = {}; document.querySelectorAll('[data-hide]').forEach(c => hide[c.dataset.hide] = c.checked);
-    return busy('Saving…', async () => { await send('/settings', { hide, watermark_text: $('#s_wm').value, min_exp: $('#s_min').value }, 'PUT'); SET = await api('/settings'); });
+    if (el.disabled) return;
+    const label = el.textContent, body = { hide, watermark_text: $('#s_wm').value, min_exp: $('#s_min').value };
+    el.disabled = true; el.textContent = 'Saving…';
+    try {
+      await send('/settings', body, 'PUT');
+      SET = { ...SET, hide, watermark_text: body.watermark_text, min_exp: Number(body.min_exp) || 0 };
+      const n = $('#setnote'); if (n) n.hidden = false;
+      toast('Privacy settings saved');
+    } catch (x) { toast('Could not save settings: ' + x.message, true); }
+    el.disabled = false; el.textContent = label; return;
   }
   if (a === 'rmlogo') { await api('/settings/logo', { method: 'DELETE' }); return go('set'); }
 });
@@ -330,6 +356,7 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'mt' && $('#cmpwrap') && !$('#cmpwrap').hidden) { clearTimeout(_cmpT); _cmpT = setTimeout(drawCompare, 250); }
   if (t.dataset.in) M[t.dataset.in] = t.value;
+  if (t.dataset.hide !== undefined || t.id === 's_wm' || t.id === 's_min') { const n = $('#setnote'); if (n) n.hidden = true; }
   if (t.dataset.f) { const empty = t.value === ''; t.classList.toggle('miss', empty && M.missing.includes(t.dataset.f)); }
 });
 document.addEventListener('change', async e => {
