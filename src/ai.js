@@ -123,7 +123,11 @@ export const ENUMS = {
   employment_type: ['Full-time', 'Part-time', 'Contract', 'Contract-to-hire', 'Internship', 'Freelance'],
 };
 
+const JD_CACHE = new Map();
+
 export async function extractJD(text) {
+  const jk = createHash('sha1').update(text.slice(0, 20000)).digest('hex');
+  if (JD_CACHE.has(jk)) return structuredClone(JD_CACHE.get(jk));
   const d = await askJson(`Extract structured requirements from this job description. It can be in ANY layout and may be noisy.
 Return ONLY JSON with exactly these keys:
 {"title":"","client":"","total_exp":null,"relevant_exp":null,"location":"","work_mode":"","employment_type":"","budget":"","current_ctc":"","expected_ctc":"","seniority":"","required_skills":[],"preferred_skills":[],"responsibilities":[],"technologies":[],"education":[],"certifications":[]}
@@ -141,6 +145,8 @@ ${text.slice(0, 20000)}`);
   for (const k of Object.keys(ENUMS)) {
     d[k] = ENUMS[k].find(v => v.toLowerCase() === String(d[k] || '').toLowerCase()) || '';
   }
+  if (JD_CACHE.size >= 100) JD_CACHE.delete(JD_CACHE.keys().next().value);
+  JD_CACHE.set(jk, structuredClone(d));
   return d;
 }
 
@@ -160,17 +166,18 @@ For EACH skill decide a status using SEMANTIC understanding, not keyword matchin
 "missing" = no real evidence.
 evidence = max 14 words, paraphrased from the resume (empty for missing).
 Also return the candidate's full name, total years of RELEVANT experience (number or null) and a one-sentence fit summary.
-Return ONLY JSON: {"candidate":"","candidate_years":null,"summary":"","skills":[{"name":"","status":"matched|partial|missing","evidence":""}]}
-Keep skill names exactly as given.
+Return ONLY JSON: {"candidate":"","candidate_years":null,"summary":"","skills":[{"i":0,"status":"matched|partial","evidence":""}]}
+IMPORTANT: list ONLY the skills that are "matched" or "partial", each referenced by its number "i". Do NOT list missing skills - every skill you leave out is treated as missing.
 
-JD SKILLS:
-${JSON.stringify(skills.map(s => s.name))}
+JD SKILLS (number. name):
+${skills.map((s, i) => `${i}. ${s.name}`).join('\n')}
 
 RESUME:
 ${text.slice(0, 20000)}`);
-  const by = new Map((d.skills || []).map(s => [String(s.name).toLowerCase(), s]));
-  d.skills = skills.map(s => {
-    const r = by.get(s.name.toLowerCase());
+  const byIdx = new Map(), by = new Map();                 // model answers by number (fallback: by name)
+  (Array.isArray(d.skills) ? d.skills : []).forEach(s => { if (Number.isInteger(+s?.i) && s.i !== '' && s.i !== null) byIdx.set(+s.i, s); if (s?.name) by.set(String(s.name).toLowerCase(), s); });
+  d.skills = skills.map((s, idx) => {
+    const r = byIdx.get(idx) || by.get(s.name.toLowerCase());
     return { name: s.name, type: s.type, status: ['matched', 'partial', 'missing'].includes(r?.status) ? r.status : 'missing', evidence: r?.evidence || '' };
   });
   if (ANALYSIS_CACHE.size >= CACHE_MAX) ANALYSIS_CACHE.delete(ANALYSIS_CACHE.keys().next().value);
