@@ -1,0 +1,137 @@
+/* CandidateMatch theme: the single source of truth for colour, type, spacing and motion.
+   Loaded first on every page (landing, workspace, admin, admin sign-in).
+   Page files (landing.css, style.css) only use these tokens, they never invent new colours.
+   Spacing is base-8: --sp-1 = 8px, --sp-2 = 16px, --sp-3 = 24px ... */
+
+/* Registered custom properties so the browser can animate them (score ring, rotating border). */
+@property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+
+:root {
+  /* surfaces: slate-950 base, neutral tonal steps for data-heavy panels */
+  --bg: #020617;
+  --surface: #0a1020;
+  --surface-2: #0f172a;
+  --inset: rgba(255, 255, 255, .035);
+
+  /* text */
+  --text: #e8ecf5;
+  --mute: #94a3b8;
+  --faint: #8391ab;
+
+  /* lines: crisp 1px hairlines */
+  --line: rgba(255, 255, 255, .10);
+  --line-2: rgba(255, 255, 255, .18);
+
+  /* brand glow: violet to cyan. Yellow is the highlighter, kept from the old logo. */
+  --g1: #8b5cf6;
+  --g2: #22d3ee;
+  --hl: #f5c518;
+  --grad: linear-gradient(135deg, var(--g1), var(--g2));
+  --grad-border: linear-gradient(135deg, rgba(139, 92, 246, .9), rgba(34, 211, 238, .55) 55%, rgba(255, 255, 255, .12));
+
+  /* status (text-safe on dark) */
+  --green: #4ade80;
+  --red: #fb7185;
+  --amber: #fbbf24;
+
+  /* base-8 spacing */
+  --sp-1: 8px; --sp-2: 16px; --sp-3: 24px; --sp-4: 32px; --sp-5: 40px; --sp-6: 48px; --sp-8: 64px; --sp-12: 96px;
+
+  /* shape */
+  --r-s: 6px; --r-m: 10px; --r-l: 16px; --r-xl: 24px;
+
+  /* type */
+  --font-display: "Bricolage Grotesque", "Geist", system-ui, sans-serif;
+  --font-body: "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* motion: a high-stiffness, mid-damping spring (about 6% overshoot, settles in ~450ms) */
+  --spring: cubic-bezier(.34, 1.45, .64, 1);
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --spring-ms: 450ms;
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring: linear(0, 0.033, 0.115, 0.228, 0.354, 0.482, 0.603, 0.712, 0.807, 0.884, 0.946, 0.992, 1.025, 1.046, 1.058, 1.063, 1.062, 1.058, 1.052, 1.044, 1.036, 1.028, 1.021, 1.014, 1.009, 1.005, 1.002, 0.999, 0.998, 0.997, 0.996, 0.996, 0.996, 0.997, 0.997, 0.998, 1);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { color-scheme: dark; -webkit-text-size-adjust: 100%; background: var(--bg); }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--font-body); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+[hidden] { display: none !important; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; }
+p { text-wrap: pretty; }
+::selection { background: rgba(139, 92, 246, .45); color: #fff; }
+
+/* Ambient background: two soft glows plus a faint grid that fades out downward. Fixed, never scrolls. */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -2; pointer-events: none;
+  background:
+    radial-gradient(56rem 36rem at 8% -12%, rgba(139, 92, 246, .20), transparent 62%),
+    radial-gradient(48rem 32rem at 104% 104%, rgba(34, 211, 238, .11), transparent 62%),
+    var(--bg);
+}
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: linear-gradient(rgba(255, 255, 255, .03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, .03) 1px, transparent 1px);
+  background-size: 64px 64px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000, transparent 75%);
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000, transparent 75%);
+}
+
+:focus-visible { outline: 2px solid var(--g2); outline-offset: 3px; border-radius: 4px; }
+
+/* ---------- Surface kit ----------
+   .card .res .stat .tile .step all share: neutral glass panel, 1px hairline,
+   a spotlight that follows the pointer (::before) and a glowing border drawn with a mask composite (::after).
+   fx.js writes --mx / --my (pointer position inside the element) and --rx / --ry (tilt). */
+.card, .res, .stat, .tile, .step {
+  position: relative; isolation: isolate;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, .015)), var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r-l);
+  transition: transform var(--spring-ms) var(--spring), border-color .25s;
+}
+.card::before, .res::before, .stat::before, .tile::before, .step::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none; opacity: 0;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), rgba(139, 92, 246, .16), transparent 60%);
+  transition: opacity .3s;
+}
+.card::after, .res::after, .stat::after, .tile::after, .step::after {
+  content: ""; position: absolute; inset: -1px; z-index: 1; border-radius: inherit; padding: 1px; pointer-events: none; opacity: 0;
+  background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 0%), rgba(167, 139, 250, .95), rgba(34, 211, 238, .45) 45%, transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  transition: opacity .3s;
+}
+@media (hover: hover) {
+  .card:hover::before, .res:hover::before, .stat:hover::before, .tile:hover::before, .step:hover::before,
+  .card:hover::after, .res:hover::after, .stat:hover::after, .tile:hover::after, .step:hover::after { opacity: 1; }
+}
+
+/* Tilt cards (stats + landing tiles): fx.js sets --rx / --ry on pointer move; they spring back on leave. */
+.stat, .tile { transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); will-change: transform; }
+@media (hover: hover) { .tile:hover { transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(1.02); } }
+
+/* Always-on glowing border: conic light that travels around the edge. Add class "glow" to any rounded box. */
+.glow { position: relative; isolation: isolate; }
+.glow::after {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 2;
+  background: conic-gradient(from var(--angle), transparent 0 62%, var(--g1) 78%, var(--g2) 90%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: orbit 6s linear infinite;
+}
+@keyframes orbit { to { --angle: 360deg; } }
+
+/* Skeleton loading rows */
+.skel { background: linear-gradient(90deg, rgba(255, 255, 255, .04), rgba(255, 255, 255, .10), rgba(255, 255, 255, .04)); background-size: 200% 100%; animation: shimmer 1.3s infinite; border-radius: var(--r-m); margin-bottom: var(--sp-2); }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+@keyframes pop { from { opacity: 0; transform: translateY(12px) scale(.96); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .stat, .tile, .tile:hover { transform: none; }
+}

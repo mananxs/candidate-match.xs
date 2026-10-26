@@ -13,12 +13,12 @@ const send = (p, body, method = 'POST') => api(p, { method, headers: { 'Content-
 let view = 'admin', ME = null, M = { busy: '', err: '' };
 let AD = { ov: null, items: [], cursor: null, f: { user_id: '', action: '', from: '', to: '' } };          // dashboard
 let AU = { id: 0, profile: null, period: 'week', buckets: [], sel: null, items: [], cursor: null, f: { action: '', from: '', to: '' } };   // one user
-const LOGO = '<svg width="24" height="24" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#0f1b2d" stroke="#f5c518" stroke-width="2"/><rect x="6" y="13" width="20" height="7" fill="#f5c518"/></svg>';
+const LOGO = '<svg width="28" height="28" viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><rect x="7" y="13" width="18" height="6" rx="3" fill="#0b1020"/><rect x="7" y="13" width="10" height="6" rx="3" fill="#f5c518"/></svg>';
 const ICON_DASH = '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>';
 const ICON_OUT = '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>';
 const SKEL = '<div class="skel" style="height:34px;width:260px"></div><div class="skel" style="height:16px;width:380px;margin-bottom:24px"></div><div class="stats"><div class="skel" style="height:84px"></div><div class="skel" style="height:84px"></div><div class="skel" style="height:84px"></div></div><div class="skel" style="height:220px"></div>';
 
-const head = (t, s, r = '') => `<div class="row" style="justify-content:space-between;margin:0 0 4px"><div><h1>${t}</h1><p class="sub">${s}</p></div>${r}</div>`;
+const head = (t, s, r = '') => `<div class="pagehead"><div><h1>${t}</h1><p class="sub">${s}</p></div>${r}</div>`;
 const status = () => (M.busy ? `<div class="spin">${esc(M.busy)}</div>` : '') + (M.err ? `<div class="err">${esc(M.err)}</div>` : '');
 
 /* ---------- Admin Panel (only for accounts listed in ADMIN_EMAILS) ---------- */
@@ -76,7 +76,7 @@ async function loadAULog(reset = true) {
 }
 async function loadAdminUser() { AU.profile = await api('/users/' + AU.id); await Promise.all([loadAUReport(), loadAULog(true)]); }
 
-const logTable = (items, showUser, more, scope) => `<table><tr><th>Date &amp; time</th>${showUser ? '<th>User</th>' : ''}<th>Activity</th><th>Details</th></tr>${items.map(r => `<tr><td style="white-space:nowrap">${fmtDT(r.created_at)}</td>${showUser ? `<td>${userLink(r.user)}</td>` : ''}<td>${actTag(r.action)}</td><td>${detailText(r)}</td></tr>`).join('') || `<tr><td colspan="${showUser ? 4 : 3}" class="meta">No activity for this selection</td></tr>`}</table>${more ? `<div class="row"><button class="g2" data-act="amore" data-scope="${scope}" ${M.busy ? 'disabled' : ''}>Load more</button></div>` : ''}`;
+const logTable = (items, showUser, more, scope) => `<div class="tscroll"><table><tr><th>Date &amp; time</th>${showUser ? '<th>User</th>' : ''}<th>Activity</th><th>Details</th></tr>${items.map(r => `<tr><td style="white-space:nowrap">${fmtDT(r.created_at)}</td>${showUser ? `<td>${userLink(r.user)}</td>` : ''}<td>${actTag(r.action)}</td><td>${detailText(r)}</td></tr>`).join('') || `<tr><td colspan="${showUser ? 4 : 3}" class="meta">No activity for this selection</td></tr>`}</table></div>${more ? `<div class="row"><button class="g2" data-act="amore" data-scope="${scope}" ${M.busy ? 'disabled' : ''}>Load more</button></div>` : ''}`;
 
 function V_admin() {
   const ov = AD.ov || { totals: {}, users: [] }, t = ov.totals, F = AD.f;
@@ -84,7 +84,7 @@ function V_admin() {
   return head('Admin Panel', 'Everything your team does in CandidateMatch. Click a user to open their dedicated dashboard.') + status() +
     `<div class="stats">${st.map(s => `<div class="stat"><small>${s[0]}</small><div>${s[1] ?? 0}</div></div>`).join('')}</div>
     <div class="card"><div class="row" style="justify-content:space-between;margin:0 0 10px"><h2 style="margin:0">Users</h2><input type="text" data-asearch placeholder="Search name or email…" style="max-width:260px;margin:0"></div>
-    <table><tr><th>User</th><th>Last active</th><th>Last sign-in</th>${ACOLS.slice(0, 4).map(c => `<th>${c[1]}</th>`).join('')}<th>Total</th></tr>${ov.users.map(u => `<tr data-q="${esc((u.name || '') + ' ' + u.email).toLowerCase()}"><td>${userLink(u)}</td><td>${u.last_activity ? fmtDT(u.last_activity) : '—'}</td><td>${fmtDT(u.last_login)}</td>${ACOLS.slice(0, 4).map(c => `<td>${u.counts[c[0]]}</td>`).join('')}<td><b>${u.counts.total}</b></td></tr>`).join('') || '<tr><td colspan="8" class="meta">No users yet</td></tr>'}</table></div>
+    <div class="tscroll"><table><tr><th>User</th><th>Last active</th><th>Last sign-in</th>${ACOLS.slice(0, 4).map(c => `<th>${c[1]}</th>`).join('')}<th>Total</th></tr>${ov.users.map(u => `<tr data-q="${esc((u.name || '') + ' ' + u.email).toLowerCase()}"><td>${userLink(u)}</td><td>${u.last_activity ? fmtDT(u.last_activity) : '—'}</td><td>${fmtDT(u.last_login)}</td>${ACOLS.slice(0, 4).map(c => `<td>${u.counts[c[0]]}</td>`).join('')}<td><b>${u.counts.total}</b></td></tr>`).join('') || '<tr><td colspan="8" class="meta">No users yet</td></tr>'}</table></div></div>
     <div class="card"><h2>Activity Log <span class="meta" style="font-weight:400">· times in ${esc(ov.tz || '')}</span></h2>
     <div class="g3" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-bottom:14px">
       <label>User<select data-af="user_id"><option value="">All users</option>${ov.users.map(u => `<option value="${u.id}" ${String(F.user_id) === String(u.id) ? 'selected' : ''}>${esc(u.name || u.email)}</option>`).join('')}</select></label>
@@ -104,7 +104,7 @@ function V_adminUser() {
     <div class="card"><div class="row" style="justify-content:space-between;margin:0 0 10px"><h2 style="margin:0">${AU.period === 'month' ? 'Monthly' : 'Weekly'} record</h2>
       <div class="seg"><button class="${AU.period === 'week' ? 'on' : ''}" data-act="aper" data-p="week">Weekly</button><button class="${AU.period === 'month' ? 'on' : ''}" data-act="aper" data-p="month">Monthly</button></div></div>
     <p class="meta" style="margin:0 0 8px">${AU.period === 'week' ? 'Last 12 weeks, Monday to Sunday.' : 'Last 12 months.'} Click “View” to list every activity in that period below.</p>
-    <table><tr><th>${bar}</th>${ACOLS.map(x => `<th>${x[1]}</th>`).join('')}<th>Total</th><th></th></tr>${AU.buckets.map(b => `<tr class="${AU.sel === b.key ? 'sel' : ''}"><td style="white-space:nowrap"><b>${esc(periodName(b, AU.period))}</b></td>${ACOLS.map(x => `<td>${b.counts[x[0]] || '<span class="meta">0</span>'}</td>`).join('')}<td><b>${b.counts.total}</b></td><td><button class="g2" data-act="abucket" data-key="${b.key}" data-from="${b.from}" data-to="${b.to}">View</button></td></tr>`).join('')}</table></div>
+    <div class="tscroll"><table><tr><th>${bar}</th>${ACOLS.map(x => `<th>${x[1]}</th>`).join('')}<th>Total</th><th></th></tr>${AU.buckets.map(b => `<tr class="${AU.sel === b.key ? 'sel' : ''}"><td style="white-space:nowrap"><b>${esc(periodName(b, AU.period))}</b></td>${ACOLS.map(x => `<td>${b.counts[x[0]] || '<span class="meta">0</span>'}</td>`).join('')}<td><b>${b.counts.total}</b></td><td><button class="g2" data-act="abucket" data-key="${b.key}" data-from="${b.from}" data-to="${b.to}">View</button></td></tr>`).join('')}</table></div></div>
     <div class="card"><div class="row" style="justify-content:space-between;margin:0 0 10px"><h2 style="margin:0">Activity log <span class="meta" style="font-weight:400">· times in ${esc(P.tz)}</span></h2><a class="btn g2" href="/admin-api/users/${u.id}/activity.csv${q ? '?' + q : ''}">Download CSV</a></div>
     <div class="g3" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-bottom:14px"><label>Activity<select data-au="action">${actOpts(F.action)}</select></label>
       <label>From<input type="date" data-au="from" value="${esc(F.from)}"></label><label>To<input type="date" data-au="to" value="${esc(F.to)}"></label>
@@ -116,7 +116,7 @@ function V_adminUser() {
 
 function drawNav() {
   const nm = ME?.name || ME?.email || '';
-  $('#nav').innerHTML = `<div class="brand">${LOGO}CandidateMatch <small style="font-weight:500;opacity:.7;font-size:12px;margin-left:2px">Admin</small></div>
+  $('#nav').innerHTML = `<div class="brand">${LOGO}CandidateMatch <small>Admin</small></div>
   <div class="navlinks"><a data-nav="admin" class="on">${ICON_DASH}Dashboard</a></div>
   <div class="userbox">${ME?.picture ? `<img src="${esc(ME.picture)}" alt="" referrerpolicy="no-referrer">` : `<span class="ph">${esc((nm[0] || '?').toUpperCase())}</span>`}<div><b>${esc(ME?.name || 'Admin')}</b><small>${esc(ME?.email || '')}</small></div><button class="g2" data-act="logout" title="Sign out">${ICON_OUT}</button></div>`;
 }

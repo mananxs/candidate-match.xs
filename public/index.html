@@ -3,10 +3,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>CandidateMatch — Read fewer resumes. Hire better.</title>
 <meta name="description" content="CandidateMatch reads every resume against your job description, ranks who fits, and hides who they are until you decide.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f1b2d'/%3E%3Crect x='6' y='13' width='20' height='7' fill='%23f5c518'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#020617">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%238b5cf6'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Crect x='7' y='13' width='18' height='6' rx='3' fill='%230b1020'/%3E%3Crect x='7' y='13' width='10' height='6' rx='3' fill='%23f5c518'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="landing.css">
+<script>
+  // Hide scroll-reveal items only while JS runs; if fx.js never loads, show everything after 3s.
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.documentElement.classList.add('fx');
+    setTimeout(function () { if (!window.__fx) document.documentElement.classList.remove('fx'); }, 3000);
+  }
+</script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head><body>
 <header class="top"><a class="mark" href="/"><i></i>CandidateMatch</a>
@@ -14,70 +23,93 @@
 
 <main>
 <section class="hero">
-  <h1 class="word"><span>CandidateMatch</span></h1>
-  <div class="split">
-    <div class="intro" id="signin">
+  <div class="intro">
+    <h1 data-rv><span>Read fewer resumes.</span><span>Hire better.</span></h1>
+    <div id="signin" data-rv>
       <p class="lead">Reads every resume against your job description, ranks who fits, and hides who they are until you decide.</p>
       <div class="g-btn" id="gHero"></div>
       <a class="btn" id="openApp" href="/app" hidden>Open your workspace</a>
       <p class="hint" id="authMsg">Sign in with a Gmail account. Your workspace is yours alone.</p>
     </div>
+    <ul class="proof" data-rv><li>PDF, DOCX or TXT in</li><li>Names hidden until you decide</li><li>Private to your account</li></ul>
+  </div>
 
+  <div class="stage" data-rv>
+    <div class="frame glow">
     <svg class="dossier" viewBox="0 0 660 500" role="img" aria-label="A job description's requirements linked to highlighted lines on a resume whose name and contact details are blacked out, stamped with a 92 percent match">
-      <rect x="296" y="30" width="340" height="448" fill="#0f1b2d"/>
-      <rect x="284" y="18" width="340" height="448" fill="#fff" stroke="#0f1b2d" stroke-width="2"/>
+      <defs><linearGradient id="wg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
+      <g class="sheet"><rect class="paper" x="284" y="18" width="340" height="448" rx="10"/></g>
       <text x="306" y="62" class="t1">Maya</text>
       <rect class="red" x="388" y="42" width="118" height="26" style="--d:.2s"/>
       <rect class="red" x="306" y="78" width="190" height="10" style="--d:.35s"/>
       <rect class="red" x="306" y="96" width="140" height="10" style="--d:.45s"/>
-      <g class="gray"><rect x="306" y="132" width="250" height="7"/><rect x="306" y="148" width="290" height="7"/><rect x="306" y="164" width="210" height="7"/></g>
-      <rect class="hl" x="300" y="196" width="262" height="22" style="--d:1.1s"/><rect class="gray" x="306" y="203" width="236" height="8"/>
-      <g class="gray"><rect x="306" y="232" width="270" height="7"/></g>
-      <rect class="hl" x="300" y="262" width="214" height="22" style="--d:1.35s"/><rect class="gray" x="306" y="269" width="190" height="8"/>
-      <g class="gray"><rect x="306" y="298" width="240" height="7"/><rect x="306" y="314" width="280" height="7"/></g>
-      <rect class="hl" x="300" y="342" width="246" height="22" style="--d:1.6s"/><rect class="gray" x="306" y="349" width="220" height="8"/>
-      <g class="gray"><rect x="306" y="380" width="200" height="7"/><rect x="306" y="396" width="260" height="7"/><rect x="306" y="412" width="170" height="7"/></g>
-      <g class="slip"><rect x="14" y="120" width="190" height="262" fill="#fff" stroke="#0f1b2d" stroke-width="2"/>
+      <g class="gray"><rect x="306" y="132" width="250" height="7" rx="3"/><rect x="306" y="148" width="290" height="7" rx="3"/><rect x="306" y="164" width="210" height="7" rx="3"/></g>
+      <rect class="hl" x="300" y="196" width="262" height="22" rx="4" style="--d:1.1s"/><rect class="gray" x="306" y="203" width="236" height="8" rx="3"/>
+      <g class="gray"><rect x="306" y="232" width="270" height="7" rx="3"/></g>
+      <rect class="hl" x="300" y="262" width="214" height="22" rx="4" style="--d:1.35s"/><rect class="gray" x="306" y="269" width="190" height="8" rx="3"/>
+      <g class="gray"><rect x="306" y="298" width="240" height="7" rx="3"/><rect x="306" y="314" width="280" height="7" rx="3"/></g>
+      <rect class="hl" x="300" y="342" width="246" height="22" rx="4" style="--d:1.6s"/><rect class="gray" x="306" y="349" width="220" height="8" rx="3"/>
+      <g class="gray"><rect x="306" y="380" width="200" height="7" rx="3"/><rect x="306" y="396" width="260" height="7" rx="3"/><rect x="306" y="412" width="170" height="7" rx="3"/></g>
+      <g class="slip"><rect class="card-bg" x="14" y="120" width="190" height="262" rx="14"/>
         <text x="30" y="154" class="t2">Looking for</text>
-        <g class="row"><rect x="30" y="178" width="16" height="16" class="bx on"/><path d="M33 186l4 4 7-9" class="ck"/><text x="56" y="191">PostgreSQL</text></g>
-        <g class="row"><rect x="30" y="226" width="16" height="16" class="bx on"/><path d="M33 234l4 4 7-9" class="ck"/><text x="56" y="239">REST APIs</text></g>
-        <g class="row"><rect x="30" y="274" width="16" height="16" class="bx on"/><path d="M33 282l4 4 7-9" class="ck"/><text x="56" y="287">Python</text></g>
-        <g class="row"><rect x="30" y="322" width="16" height="16" class="bx"/><text x="56" y="335" class="miss">Kubernetes</text></g></g>
+        <g class="row"><rect x="30" y="178" width="16" height="16" rx="4" class="bx on"/><path d="M33 186l4 4 7-9" class="ck"/><text x="56" y="191">PostgreSQL</text></g>
+        <g class="row"><rect x="30" y="226" width="16" height="16" rx="4" class="bx on"/><path d="M33 234l4 4 7-9" class="ck"/><text x="56" y="239">REST APIs</text></g>
+        <g class="row"><rect x="30" y="274" width="16" height="16" rx="4" class="bx on"/><path d="M33 282l4 4 7-9" class="ck"/><text x="56" y="287">Python</text></g>
+        <g class="row"><rect x="30" y="322" width="16" height="16" rx="4" class="bx"/><text x="56" y="335" class="miss">Kubernetes</text></g></g>
       <path class="wire" d="M204 186C240 186 250 207 296 207" style="--d:.9s"/>
       <path class="wire" d="M204 234C240 234 250 273 296 273" style="--d:1.15s"/>
       <path class="wire" d="M204 282C240 282 250 353 296 353" style="--d:1.4s"/>
-      <g class="stamp"><circle cx="560" cy="428" r="58" fill="#fff" fill-opacity=".92" stroke="#0f1b2d" stroke-width="4"/><circle cx="560" cy="428" r="48" fill="none" stroke="#0f1b2d" stroke-width="1.5"/>
+      <g class="stamp"><circle cx="560" cy="428" r="58"/><circle cx="560" cy="428" r="48"/>
         <text x="560" y="440" text-anchor="middle" class="big score" data-n="92">92%</text><text x="560" y="462" text-anchor="middle" class="sm">shortlist</text></g>
     </svg>
+    </div>
   </div>
 </section>
 
-<section id="what" class="plain">
-  <h2>What it does</h2>
-  <dl>
-    <div><dt>Matches by meaning</dt><dd>“Postgres” and PostgreSQL are the same skill. “Built REST services in Flask” counts toward both Python and REST.</dd></div>
-    <div><dt>Ranks the pile</dt><dd>Drop in a folder of resumes and every one is scored against your job description and sorted by fit.</dd></div>
-    <div><dt>Hides identity</dt><dd>Surname, email, phone, links and photos come off. Download a watermarked PDF to share.</dd></div>
-    <div><dt>Reads the JD for you</dt><dd>Upload or paste it and the requirements fill themselves in. Anything missing is flagged.</dd></div>
-    <div><dt>One desk per recruiter</dt><dd>Your job descriptions, candidates and settings are private to your account.</dd></div>
-    <div><dt>Deletes on request</dt><dd>Remove a job description or a candidate whenever you want. Full data removal is handled by your administrator.</dd></div>
-  </dl>
+<section id="what" class="sec">
+  <div class="sec-head" data-rv><h2>What it does</h2><p class="sec-sub">From a folder of resumes to a ranked, anonymous shortlist.</p></div>
+  <div class="bento">
+    <article class="tile w4" data-rv>
+      <div><h3>Matches by meaning</h3><p>“Postgres” and PostgreSQL are the same skill. “Built REST services in Flask” counts toward both Python and REST.</p></div>
+      <div class="viz"><div class="pair"><span class="pill">Postgres</span><span class="eq">=</span><span class="pill on">PostgreSQL</span></div><div class="pair"><span class="pill">Built REST services in Flask</span><span class="eq">counts toward</span><span class="pill on">Python</span><span class="pill on">REST</span></div></div>
+    </article>
+    <article class="tile w2" data-rv>
+      <div><h3>Ranks the pile</h3><p>Every resume is scored against your job description and sorted by fit.</p></div>
+      <div class="viz"><div class="rk"><span>#1</span><i style="--w:92%"></i><em>92</em></div><div class="rk"><span>#2</span><i style="--w:78%"></i><em>78</em></div><div class="rk"><span>#3</span><i style="--w:55%"></i><em>55</em></div></div>
+    </article>
+    <article class="tile w2" data-rv>
+      <div><h3>Hides identity</h3><p>Surname, email, phone, links and photos come off. Download a watermarked PDF to share.</p></div>
+      <div class="redact" aria-hidden="true"><span class="k" style="--w:52%"></span><span style="width:80%"></span><span class="k" style="--w:68%"></span></div>
+    </article>
+    <article class="tile w4" data-rv>
+      <div><h3>Reads the JD for you</h3><p>Upload or paste it and the requirements fill themselves in. Anything missing is flagged.</p></div>
+      <div class="viz"><div class="pair"><span class="pill on">Title found</span><span class="pill on">Experience found</span><span class="pill on">Skills found</span><span class="pill warn">Budget missing</span></div></div>
+    </article>
+    <article class="tile w3" data-rv>
+      <div><h3>One desk per recruiter</h3><p>Your job descriptions, candidates and settings are private to your account.</p></div>
+      <div class="viz"><div class="pair"><span class="pill on">Your JDs</span><span class="pill on">Your candidates</span><span class="pill on">Your settings</span></div></div>
+    </article>
+    <article class="tile w3" data-rv>
+      <div><h3>Deletes on request</h3><p>Remove a job description or a candidate whenever you want. Full data removal is handled by your administrator.</p></div>
+      <div class="viz"><div class="pair"><span class="pill">Remove a job description</span><span class="pill">Remove a candidate</span></div></div>
+    </article>
+  </div>
 </section>
 
-<section id="how" class="plain how">
-  <h2>How it works</h2>
-  <ol>
-    <li><b>Add the job description.</b><span>Requirements are extracted for you to confirm.</span></li>
-    <li><b>Drop in resumes.</b><span>PDF, DOCX or TXT. Each one comes back scored, with skills matched and missing.</span></li>
-    <li><b>Share the shortlist.</b><span>Mask personal details, add your watermark, send.</span></li>
+<section id="how" class="sec">
+  <div class="sec-head" data-rv><h2>How it works</h2></div>
+  <ol class="steps">
+    <li class="step" data-rv><span class="n">1</span><b>Add the job description.</b><span class="t">Requirements are extracted for you to confirm.</span></li>
+    <li class="step" data-rv><span class="n">2</span><b>Drop in resumes.</b><span class="t">PDF, DOCX or TXT. Each one comes back scored, with skills matched and missing.</span></li>
+    <li class="step" data-rv><span class="n">3</span><b>Share the shortlist.</b><span class="t">Mask personal details, add your watermark, send.</span></li>
   </ol>
 </section>
 
-<section class="close">
-  <p>Fewer resumes to read.</p>
-  <div class="g-btn" id="gBottom"></div>
+<section class="cta" data-rv>
+  <div class="cta-box glow"><p>Fewer resumes to read.</p><div class="g-btn" id="gBottom"></div></div>
 </section>
 </main>
 <footer><span>© <span id="yr"></span> CandidateMatch</span><span>Made for recruiters who value their time. · <a class="adm" href="/admin">Admin</a></span></footer>
 <script src="landing.js"></script>
+<script src="fx.js" defer></script>
 </body></html>

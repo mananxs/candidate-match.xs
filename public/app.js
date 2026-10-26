@@ -36,10 +36,11 @@ const ICON = {
   proc: '<path d="M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/>',
   jds: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>',
   set: '<path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  up: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
   out: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
 };
 const svg = k => `<svg viewBox="0 0 24 24">${ICON[k]}</svg>`;
-const LOGO = '<svg width="24" height="24" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#0f1b2d" stroke="#f5c518" stroke-width="2"/><rect x="6" y="13" width="20" height="7" fill="#f5c518"/></svg>';
+const LOGO = '<svg width="28" height="28" viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><rect x="7" y="13" width="18" height="6" rx="3" fill="#0b1020"/><rect x="7" y="13" width="10" height="6" rx="3" fill="#f5c518"/></svg>';
 const SKEL = '<div class="skel" style="height:34px;width:260px"></div><div class="skel" style="height:16px;width:380px;margin-bottom:24px"></div><div class="stats"><div class="skel" style="height:84px"></div><div class="skel" style="height:84px"></div><div class="skel" style="height:84px"></div></div><div class="skel" style="height:220px"></div>';
 const HIDE = { surname: 'Surname', address: 'Address', email: 'Email', phone: 'Phone', linkedin: 'LinkedIn', github: 'GitHub', social: 'Social media', sites: 'Personal websites', dates: 'Exact employment dates', employer: 'Employer names', photos: 'Photos', latest: 'Hide latest/current employer' };
 const SELS = { work_mode: ['Remote', 'Hybrid', 'On-site'], employment_type: ['Full-time', 'Part-time', 'Contract', 'Contract-to-hire', 'Internship', 'Freelance'] };
@@ -49,7 +50,7 @@ const AREAS = [['required_skills', 'Required skills (relevant)', ','], ['preferr
 const AR = new Set(AREAS.map(a => a[0]));
 
 /* ---------- shared pieces ---------- */
-const head = (t, s, r = '') => `<div class="row" style="justify-content:space-between;margin:0 0 4px"><div><h1>${t}</h1><p class="sub">${s}</p></div>${r}</div>`;
+const head = (t, s, r = '') => `<div class="pagehead"><div><h1>${t}</h1><p class="sub">${s}</p></div>${r}</div>`;
 const status = () => (M.busy ? `<div class="spin">${esc(M.busy)}</div>` : '') + (M.err ? `<div class="err">${esc(M.err)}</div>` : '');
 const savedJds = () => JDS.filter(j => j.status === 'saved');
 const jdOpts = () => '<option value="">Select saved JD</option>' + savedJds().map(j => `<option value="${j.id}" ${M.jd?.id === j.id ? 'selected' : ''}>${j.code} · ${esc(j.title || 'Untitled')}</option>`).join('');
@@ -67,7 +68,7 @@ const LEG = '<div class="legend"><span>Matched skills:</span><span class="g">Gre
 function card(c, i) {
   const a = c.analysis, sk = a.skills.slice().sort((x, y) => ord[x.type] - ord[y.type]);
   const m = sk.filter(s => s.status !== 'missing'), x = sk.filter(s => s.status === 'missing'), jd = jdOf(c.jd_id);
-  return `<div class="res"><div class="head"><div><div class="rank">#${i + 1}</div><div class="pct">${c.score}%</div></div><div style="flex:1;min-width:200px">
+  return `<div class="res"><div class="head"><div class="scorebox"><div class="rank">#${i + 1}</div><div class="ring" style="--p:${c.score}"><div class="pct">${c.score}%</div></div></div><div style="flex:1;min-width:200px">
   <div class="name">${esc(c.label)}</div><div class="meta">ATS match for ${esc(jd?.title || 'role')} · ${esc(c.file_name)}</div>
   <div class="bar"><i style="width:${c.score}%"></i></div><div class="meta">Required covered: ${c.req_hit} / ${c.req_total}${a.candidate_years != null ? ' · Experience: ' + esc(a.candidate_years) + ' yrs' + (a.required_years ? ' (needs ' + a.required_years + ')' : '') : ''}</div></div></div>
   <div class="box"><div class="col"><h3>Matched skills (${m.length})</h3>${m.map(s => skRow(s, 1)).join('') || '<span class="meta">None</span>'}</div>
@@ -110,7 +111,7 @@ const missingOf = jd => [...FIELDS.filter(f => f[0] !== 'client').map(f => f[0])
 function V_dash() {
   const st = [['Resumes uploaded', ST.resumes], ['JDs uploaded', ST.jds], ['Resumes masked', ST.masked], ['Masking failed', ST.mask_failed, 1], ['Total candidates', ST.resumes], ['Shortlisted', ST.shortlisted]];
   return head(`Welcome back, <span class="hello">${esc((USER?.name || '').split(' ')[0] || 'there')}</span>`, 'Your private hiring workspace — screening activity at a glance.') + `<div class="stats">${st.map(s => `<div class="stat ${s[2] ? 'bad' : ''}"><small>${s[0]}</small><div>${s[1] ?? 0}</div></div>`).join('')}</div>
-  <div class="grid"><div class="card"><h2>Recent processed resumes</h2>${(ST.recent_candidates || []).map(x => `<div class="row" style="justify-content:space-between;margin:6px 0"><span><b>${esc(x.label)}</b> <span class="meta">${fmt(x.created_at)}</span></span><span class="tag ${x.mask_status === 'failed' ? 'bad' : ''}">${x.score}%${x.mask_status === 'failed' ? ' · Masking failed' : ''}</span></div>`).join('') || '<span class="meta">None yet</span>'}</div>
+  <div class="grid bento"><div class="card"><h2>Recent processed resumes</h2>${(ST.recent_candidates || []).map(x => `<div class="row" style="justify-content:space-between;margin:6px 0"><span><b>${esc(x.label)}</b> <span class="meta">${fmt(x.created_at)}</span></span><span class="tag ${x.mask_status === 'failed' ? 'bad' : ''}">${x.score}%${x.mask_status === 'failed' ? ' · Masking failed' : ''}</span></div>`).join('') || '<span class="meta">None yet</span>'}</div>
   <div class="card"><h2>Recent job descriptions</h2>${(ST.recent_jds || []).map(j => `<div style="margin:6px 0"><b>${j.code}</b> · ${esc(j.title || 'Untitled')} <span class="meta">${[j.employment_type, j.location].filter(Boolean).join(' · ')} ${fmt(j.created_at)}</span></div>`).join('') || '<span class="meta">None yet</span>'}</div></div>`;
 }
 
@@ -119,11 +120,11 @@ function V_match(bulk) {
   const jdBox = bulk
     ? `<div class="card"><h2>1 · Choose JD</h2><select data-sel="jd" style="max-width:360px">${jdOpts()}</select>${M.jd ? `<p class="meta">${esc(M.jd.title)} · ${(M.jd.required_skills || []).length} required, ${(M.jd.preferred_skills || []).length} preferred skills</p>` : '<p class="meta">Add and save JDs on the Job Descriptions page first.</p>'}</div>`
     : `<div class="card"><h2>1 · Upload JD</h2><label>Or use a saved JD<select data-sel="jd" style="max-width:360px">${jdOpts()}</select></label>
-       <div class="grid" style="margin-top:12px"><div class="drop" data-drop="jd"><div><b>Upload JD</b>PDF, DOCX or TXT · max 10 MB · requirements are filled automatically</div></div>
+       <div class="grid" style="margin-top:12px"><div class="drop" data-drop="jd"><div><span class="dz-ic">${svg('up')}</span><b>Upload JD</b>PDF, DOCX or TXT · max 10 MB · requirements are filled automatically</div></div>
        <textarea data-in="text" style="min-height:120px" placeholder="…or paste the job description here">${esc(M.text)}</textarea></div>
        <div class="row"><button data-act="extract" ${M.busy ? 'disabled' : ''}>Extract Requirements</button>${M.jd ? `<button class="dng" data-act="rmjd" ${M.busy ? 'disabled' : ''}>Remove JD</button>` : ''}</div>${M.jd ? reqForm(M.jd) : ''}</div>`;
   return head(bulk ? 'Bulk Resume Processing' : 'JD Match Analyzer', 'Any resume format works. The AI matches skills by meaning, scores each candidate and ranks them.') + jdBox +
-    `<div class="card"><h2>2 · Upload Resume${bulk ? 's' : '(s)'}</h2><div class="drop" data-drop="res"><div><b>Upload Resumes</b>Drag &amp; drop PDF, DOCX or TXT · max 10 MB each</div></div>
+    `<div class="card"><h2>2 · Upload Resume${bulk ? 's' : '(s)'}</h2><div class="drop" data-drop="res"><div><span class="dz-ic">${svg('up')}</span><b>Upload Resumes</b>Drag &amp; drop PDF, DOCX or TXT · max 10 MB each</div></div>
     <div>${M.files.map(f => `<span class="chip ${f.err ? 'bad' : ''}">${esc(f.name)}${f.err ? ': ' + esc(f.err) : ''}</span>`).join('')}</div>
     <div class="row"><button data-act="analyze" ${M.busy || !M.files.length ? 'disabled' : ''}>Analyze Match</button><button class="g2" data-act="reset">Clear</button></div>${status()}</div>` +
     (rs.length ? LEG + rs.map(card).join('') : '');
@@ -132,23 +133,23 @@ function V_match(bulk) {
 function V_cands() {
   return head('Candidates', 'Ranked by ATS score, then required-skill coverage, then total skills matched.',
     `<select data-sel="cf" style="max-width:280px"><option value="">All JDs</option>${JDS.map(j => `<option value="${j.id}" ${String(CF) === String(j.id) ? 'selected' : ''}>${j.code} · ${esc(j.title || '')}</option>`).join('')}</select>`) + status() +
-    `<div class="card"><table><tr><th>Rank</th><th>Candidate</th><th>JD</th><th>ATS</th><th>Required</th><th>Shortlist</th><th></th></tr>${CANDS.map((c, i) => `<tr><td>${i + 1}</td><td><b>${esc(c.label)}</b></td><td>${esc(jdOf(c.jd_id)?.title || '—')}</td><td><b>${c.score}%</b></td><td>${c.req_hit}/${c.req_total}</td>
-    <td><input type="checkbox" data-act="short" data-id="${c.id}" ${c.shortlisted ? 'checked' : ''}></td><td style="white-space:nowrap"><button class="g2" data-act="viewc" data-id="${c.id}">View</button> <button class="dng" data-act="delc" data-id="${c.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="7" class="meta">No candidates yet</td></tr>'}</table></div>`;
+    `<div class="card flush"><div class="tscroll"><table><tr><th>Rank</th><th>Candidate</th><th>JD</th><th>ATS</th><th>Required</th><th>Shortlist</th><th></th></tr>${CANDS.map((c, i) => `<tr><td>${i + 1}</td><td><b>${esc(c.label)}</b></td><td>${esc(jdOf(c.jd_id)?.title || '—')}</td><td><b>${c.score}%</b></td><td>${c.req_hit}/${c.req_total}</td>
+    <td><input type="checkbox" data-act="short" data-id="${c.id}" ${c.shortlisted ? 'checked' : ''}></td><td style="white-space:nowrap"><button class="g2" data-act="viewc" data-id="${c.id}">View</button> <button class="dng" data-act="delc" data-id="${c.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="7" class="meta">No candidates yet</td></tr>'}</table></div></div>`;
 }
 
 function V_proc() {
   const st = c => c.mask_status === 'masked' ? '<span class="tag ok">Masked</span>' : c.mask_status === 'failed' ? `<span class="tag bad" title="${esc(c.mask_error || '')}">Masking failed</span>` : '<span class="tag">Not masked</span>';
   return head('Processed Resumes', 'Anonymize per your privacy settings, review, clean up and download as a watermarked PDF.', `<div class="row" style="margin:0"><button data-act="maskSel" ${M.busy || !SEL.size ? 'disabled' : ''}>Reprocess Selected (${SEL.size})</button><button class="dng" data-act="delsel" ${M.busy || !SEL.size ? 'disabled' : ''}>Delete Selected (${SEL.size})</button></div>`) + status() +
-    `<div class="card"><table><tr><th><input type="checkbox" data-act="selall" title="Select all" ${CANDS.length && SEL.size === CANDS.length ? 'checked' : ''}></th><th>Candidate</th><th>File</th><th>Date</th><th>Status</th><th></th></tr>${CANDS.map(c => `<tr><td><input type="checkbox" data-act="sel" data-id="${c.id}" ${SEL.has(c.id) ? 'checked' : ''}></td><td><b>${esc(c.label)}</b></td><td>${esc(c.file_name)}</td><td>${fmt(c.created_at)}</td><td>${st(c)}</td>
+    `<div class="card flush"><div class="tscroll"><table><tr><th><input type="checkbox" data-act="selall" title="Select all" ${CANDS.length && SEL.size === CANDS.length ? 'checked' : ''}></th><th>Candidate</th><th>File</th><th>Date</th><th>Status</th><th></th></tr>${CANDS.map(c => `<tr><td><input type="checkbox" data-act="sel" data-id="${c.id}" ${SEL.has(c.id) ? 'checked' : ''}></td><td><b>${esc(c.label)}</b></td><td>${esc(c.file_name)}</td><td>${fmt(c.created_at)}</td><td>${st(c)}</td>
     <td style="white-space:nowrap"><button data-act="mask" data-id="${c.id}" ${M.busy ? 'disabled' : ''}>${c.mask_status === 'masked' ? 'Reprocess' : 'Mask'}</button>
-    ${c.mask_status === 'masked' ? `<button class="g2" data-act="preview" data-id="${c.id}">Preview &amp; edit</button> <a class="btn g2" href="/api/candidates/${c.id}/masked.pdf?wm=1&download=1">Download PDF</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="meta">Nothing processed yet</td></tr>'}</table></div>`;
+    ${c.mask_status === 'masked' ? `<button class="g2" data-act="preview" data-id="${c.id}">Preview &amp; edit</button> <a class="btn g2" href="/api/candidates/${c.id}/masked.pdf?wm=1&download=1">Download PDF</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="meta">Nothing processed yet</td></tr>'}</table></div></div>`;
 }
 
 function V_jds() {
   return head('Job Descriptions', 'Client names are stored internally only and never appear on an anonymized resume.', `<button data-act="upjd" ${M.busy ? 'disabled' : ''}>Upload JD</button>`) + status() +
-    `<div class="card"><table><tr><th>JD ID</th><th>Job title</th><th>Client</th><th>Cands</th><th>Required skills</th><th>Exp</th><th>Type</th><th>Location</th><th>Created</th><th></th></tr>${JDS.map(j => `<tr><td>${j.code}</td><td>${esc(j.title || 'Untitled')} ${j.status === 'draft' ? '<span class="tag">draft</span>' : ''}</td><td>${esc(j.client || '—')}</td><td>${j.cand_count}</td>
+    `<div class="card flush"><div class="tscroll"><table><tr><th>JD ID</th><th>Job title</th><th>Client</th><th>Cands</th><th>Required skills</th><th>Exp</th><th>Type</th><th>Location</th><th>Created</th><th></th></tr>${JDS.map(j => `<tr><td>${j.code}</td><td>${esc(j.title || 'Untitled')} ${j.status === 'draft' ? '<span class="tag">draft</span>' : ''}</td><td>${esc(j.client || '—')}</td><td>${j.cand_count}</td>
     <td>${esc((j.required_skills || []).slice(0, 6).join(', ') || '—')}</td><td>${j.total_exp ? j.total_exp + '+ yrs' : '—'}</td><td>${esc(j.employment_type || '—')}</td><td>${esc(j.location || '—')}</td><td>${fmt(j.created_at)}</td>
-    <td style="white-space:nowrap"><button class="g2" data-act="edjd" data-id="${j.id}">Edit</button> <button class="g2" data-act="matchjd" data-id="${j.id}">Match</button> <button class="dng" data-act="deljd" data-id="${j.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="10" class="meta">No JDs yet</td></tr>'}</table></div>`;
+    <td style="white-space:nowrap"><button class="g2" data-act="edjd" data-id="${j.id}">Edit</button> <button class="g2" data-act="matchjd" data-id="${j.id}">Match</button> <button class="dng" data-act="deljd" data-id="${j.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="10" class="meta">No JDs yet</td></tr>'}</table></div></div>`;
 }
 
 function V_set() {
