@@ -4,14 +4,19 @@ import { buildSkills } from './match.js';
 /**
  * Pluggable LLM layer. Set AI_PROVIDER in .env:
  *   gemini    (default, FREE tier via Google AI Studio key)
- *   openai    (any OpenAI-compatible API: Groq / OpenRouter free models, Ollama local, OpenAI)
+ *   groq      (FREE tier via console.groq.com key; set GROQ_API_KEY or GROQ_API_KEYS=k1,k2)
+ *   openai    (any OpenAI-compatible API: OpenRouter free models, Ollama local, OpenAI)
  *   anthropic (Claude)
+ * If AI_PROVIDER is not set: uses gemini when a Gemini key exists, else groq when a Groq key exists.
  */
-const PROVIDER = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
+const splitKeys = v => (v || '').split(',').map(k => k.trim()).filter(Boolean);
+const GEMINI_KEYS = splitKeys(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY);
+const GROQ_KEYS = splitKeys(process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY);
+const PROVIDER = (process.env.AI_PROVIDER || (!GEMINI_KEYS.length && GROQ_KEYS.length ? 'groq' : 'gemini')).toLowerCase();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 class AiHttpError extends Error {
-  constructor(status, body) { super(`AI request failed (${status}): ${body.slice(0, 300)}`); this.status = status; this.body = body; }
+  constructor(status, body, retryAfter = 0) { super(`AI request failed (${status}): ${body.slice(0, 300)}`); this.status = status; this.body = body; this.retryAfter = retryAfter; }
 }
 
 async function post(url, headers, body, { retry429 = true } = {}) {
@@ -21,71 +26,146 @@ async function post(url, headers, body, { retry429 = true } = {}) {
     const msg = await r.text();
     const retryable = (r.status === 429 && retry429) || r.status >= 500;
     if (retryable && attempt < 3) { await sleep(3000 * (attempt + 1)); continue; } // free-tier rate limits
-    throw new AiHttpError(r.status, msg);
+    throw new AiHttpError(r.status, msg, Number(r.headers.get('retry-after')) || 0);
   }
 }
 
-/* ---- Gemini key pool: GEMINI_API_KEYS=key1,key2,key3 (falls back to GEMINI_API_KEY) ----
+/* ---- Key pools: GEMINI_API_KEYS=k1,k2 / GROQ_API_KEYS=k1,k2 (falls back to the single *_API_KEY) ----
    When a key hits its quota (429) it is parked for a while and the next key is used automatically. */
-const GEMINI_KEYS = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '').split(',').map(k => k.trim()).filter(Boolean);
-const parkedUntil = new Map();   // key -> time (ms) when it may be used again
-let nextKey = 0;
-
-function pickKey() {             // round-robin over keys that are not parked
-  const now = Date.now();
-  for (let i = 0; i < GEMINI_KEYS.length; i++) {
-    const key = GEMINI_KEYS[(nextKey + i) % GEMINI_KEYS.length];
-    if ((parkedUntil.get(key) || 0) <= now) { nextKey = (nextKey + i + 1) % GEMINI_KEYS.length; return key; }
-  }
-  return null;
-}
-const earliestFree = () => Math.min(...GEMINI_KEYS.map(k => parkedUntil.get(k) || 0));
-
-async function geminiPost(url, body) {
-  if (!GEMINI_KEYS.length) throw new Error('GEMINI_API_KEY is not set');
-  for (let tries = 0; tries < GEMINI_KEYS.length * 2 + 2; tries++) {
-    const key = pickKey();
-    if (!key) {                                  // every key is parked: wait for the soonest one (max ~70 s)
-      const wait = earliestFree() - Date.now();
-      if (wait > 70000) break;
-      await sleep(wait + 500);
-      continue;
+class KeyPool {
+  constructor(name, keys, envVar) { this.name = name; this.keys = keys; this.envVar = envVar; this.parked = new Map(); this.next = 0; }
+  pick(scope) {                                // round-robin over keys that are not parked for this model
+    const now = Date.now();
+    for (let i = 0; i < this.keys.length; i++) {
+      const key = this.keys[(this.next + i) % this.keys.length];
+      if ((this.parked.get(key + '|' + scope) || 0) <= now) { this.next = (this.next + i + 1) % this.keys.length; return key; }
     }
-    try {
-      return await post(url, { 'x-goog-api-key': key }, body, { retry429: false });
-    } catch (e) {
-      if (e.status !== 429) throw e;
-      const daily = /PerDay/i.test(e.body || '');            // daily quota -> park longer than per-minute quota
-      parkedUntil.set(key, Date.now() + (daily ? 60 * 60 * 1000 : 65 * 1000));
-      console.warn(`[ai] Gemini key #${GEMINI_KEYS.indexOf(key) + 1} of ${GEMINI_KEYS.length} hit its ${daily ? 'daily' : 'per-minute'} quota - switching key`);
-    }
+    return null;
   }
-  throw new Error('All Gemini API keys have hit their quota. Wait a few minutes (or until tomorrow if the daily limit is used up) or add another key.');
+  earliestFree(scope) { return Math.min(...this.keys.map(k => this.parked.get(k + '|' + scope) || 0)); }
+  // parkFor(error) -> ms to park the key for after a 429
+  async post(url, headersFor, body, parkFor, scope = '', maxWait = 70000) {
+    if (!this.keys.length) throw new Error(`${this.envVar} is not set`);
+    for (let tries = 0; tries < this.keys.length * 2 + 2; tries++) {
+      const key = this.pick(scope);
+      if (!key) {                              // every key is parked: wait for the soonest one (up to maxWait)
+        const wait = this.earliestFree(scope) - Date.now();
+        if (wait > maxWait) break;
+        await sleep(wait + 500);
+        continue;
+      }
+      try {
+        return await post(url, headersFor(key), body, { retry429: false });
+      } catch (e) {
+        if (e.status !== 429) throw e;
+        this.parked.set(key + '|' + scope, Date.now() + parkFor(e));
+        console.warn(`[ai] ${this.name} key #${this.keys.indexOf(key) + 1} of ${this.keys.length} hit its quota${scope ? ' on ' + scope : ''}`);
+      }
+    }
+    const err = new Error(`All ${this.name} API keys have hit their quota${scope ? ' for ' + scope : ''}. Wait a few minutes (or until tomorrow if the daily limit is used up) or add another key.`);
+    err.quota = true;
+    throw err;
+  }
 }
+const geminiPool = new KeyPool('Gemini', GEMINI_KEYS, 'GEMINI_API_KEY');
+const groqPool = new KeyPool('Groq', GROQ_KEYS, 'GROQ_API_KEY');
+
+// With several models in the chain we do NOT wait for a parked key: we move to the next model straight away.
+const geminiPost = (url, body, scope, maxWait) => geminiPool.post(url, key => ({ 'x-goog-api-key': key }), body,
+  e => /PerDay/i.test(e.body || '') ? 60 * 60 * 1000 : 65 * 1000, scope, maxWait);   // daily quota -> park longer than per-minute quota
+// Groq tells us how long to wait via the retry-after header; a per-day limit parks the key for an hour.
+const groqPost = (url, body, scope, maxWait) => groqPool.post(url, key => ({ Authorization: `Bearer ${key}` }), body,
+  e => /per day|\bTPD\b|\bRPD\b/i.test(e.body || '') ? 60 * 60 * 1000 : Math.min(Math.max((e.retryAfter || 20) * 1000, 5000), 120000), scope, maxWait);
 
 // Gemini 'thinking' adds many seconds per call. 0 = off (fast). Set GEMINI_THINKING_BUDGET=-1 for the model's default dynamic thinking.
 let THINK_BUDGET = process.env.GEMINI_THINKING_BUDGET === undefined || process.env.GEMINI_THINKING_BUDGET === '' ? 0 : Number(process.env.GEMINI_THINKING_BUDGET);
 
+// Models are tried in order; when one is out of quota the next one is used automatically.
+// GEMINI_MODELS=a,b,c  (falls back to the single GEMINI_MODEL, then to the default chain below)
+const GEMINI_MODELS = splitKeys(process.env.GEMINI_MODELS || process.env.GEMINI_MODEL).length
+  ? splitKeys(process.env.GEMINI_MODELS || process.env.GEMINI_MODEL)
+  : ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemma-4-31b-it', 'gemma-4-26b-a4b-it'];
+const GROQ_MODELS = splitKeys(process.env.GROQ_MODELS || process.env.GROQ_MODEL).length
+  ? splitKeys(process.env.GROQ_MODELS || process.env.GROQ_MODEL)
+  : ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+const BAD_MODEL = e => e.status === 404 || (e.status === 400 && /not found|not supported|unsupported|invalid model|decommission/i.test(e.body || ''));
+const noThink = new Set(), noJsonMode = new Set();      // models that rejected these settings (remembered)
+
+async function geminiAsk(prompt, { max, json, pdf }) {
+  const parts = [{ text: prompt }];
+  if (pdf) parts.unshift({ inlineData: { mimeType: 'application/pdf', data: pdf.toString('base64') } });
+  let lastErr;
+  for (let mi = 0; mi < GEMINI_MODELS.length; mi++) {
+    const model = GEMINI_MODELS[mi];
+    const last = mi === GEMINI_MODELS.length - 1;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const body = () => {
+      const cfg = { maxOutputTokens: Math.max(max, 8192), temperature: 0.1, ...(json && !noJsonMode.has(model) ? { responseMimeType: 'application/json' } : {}) };
+      return { contents: [{ role: 'user', parts }], generationConfig: THINK_BUDGET === null || noThink.has(model) ? cfg : { ...cfg, thinkingConfig: { thinkingBudget: THINK_BUDGET } } };
+    };
+    try {
+      let d;
+      for (let fix = 0; ; fix++) {                // retry the same model once per unsupported setting
+        try { d = await geminiPost(url, body(), model, last ? 70000 : 0); break; }
+        catch (e) {
+          if (e.status !== 400 || fix > 2) throw e;
+          if (/think/i.test(e.body || '') && !noThink.has(model)) noThink.add(model);
+          else if (/mime|json/i.test(e.body || '') && !noJsonMode.has(model)) noJsonMode.add(model);
+          else throw e;
+        }
+      }
+      const out = (d.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
+      if (!out) throw new Error('Gemini returned an empty response' + (d.promptFeedback?.blockReason ? ` (blocked: ${d.promptFeedback.blockReason})` : ''));
+      if (mi) console.log(`[ai] answered by ${model}`);
+      return out;
+    } catch (e) {
+      lastErr = e;
+      if (e.quota || BAD_MODEL(e)) { if (BAD_MODEL(e)) console.warn(`[ai] model "${model}" is not available - trying the next one`); else console.warn(`[ai] ${model} is out of quota - trying the next model`); continue; }
+      throw e;
+    }
+  }
+  const err = new Error('All Gemini models/keys have hit their quota (or are unavailable). Wait a few minutes, or until tomorrow if the daily limit is used up, or add another key / a Groq key. Last error: ' + (lastErr?.message || ''));
+  err.quota = true;
+  throw err;
+}
+
+async function groqAsk(prompt, { max, json, pdf }) {
+  if (pdf) throw new Error('Scanned (image-only) PDFs need AI_PROVIDER=gemini or anthropic (Groq cannot read PDFs). Use a text-based PDF/DOCX instead.');
+  const base = (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
+  let lastErr;
+  for (let mi = 0; mi < GROQ_MODELS.length; mi++) {
+    const model = GROQ_MODELS[mi];
+    const last = mi === GROQ_MODELS.length - 1;
+    const body = { model, max_tokens: max, temperature: 0.1, messages: [{ role: 'user', content: prompt }], ...(json ? { response_format: { type: 'json_object' } } : {}) };
+    try {
+      const d = await groqPost(`${base}/chat/completions`, body, model, last ? 70000 : 0);
+      const out = d.choices?.[0]?.message?.content || '';
+      if (!out) throw new Error('Groq returned an empty response');
+      return out;
+    } catch (e) {
+      lastErr = e;
+      if (e.quota || BAD_MODEL(e)) { console.warn(`[ai] Groq model ${model} unavailable/out of quota - trying the next model`); continue; }
+      throw e;
+    }
+  }
+  const err = new Error('All Groq models/keys have hit their quota. Wait a few minutes or add another key. Last error: ' + (lastErr?.message || ''));
+  err.quota = true;
+  throw err;
+}
+
 // prompt: string. pdf: optional Buffer (scanned PDFs, native on gemini / anthropic only).
 async function ask(prompt, { max = 4096, json = false, pdf = null } = {}) {
   if (PROVIDER === 'gemini') {
-    const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
-    const parts = [{ text: prompt }];
-    if (pdf) parts.unshift({ inlineData: { mimeType: 'application/pdf', data: pdf.toString('base64') } });
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-    const cfg = { maxOutputTokens: Math.max(max, 8192), temperature: 0.1, ...(json ? { responseMimeType: 'application/json' } : {}) };
-    const body = think => ({ contents: [{ role: 'user', parts }], generationConfig: think === null ? cfg : { ...cfg, thinkingConfig: { thinkingBudget: think } } });
-    let d;
-    try { d = await geminiPost(url, body(THINK_BUDGET)); }
-    catch (e) {                                   // model does not accept the thinking setting -> remember and retry without it
-      if (THINK_BUDGET === null || e.status !== 400 || !/think/i.test(e.body || '')) throw e;
-      THINK_BUDGET = null;
-      d = await geminiPost(url, body(null));
+    try { return await geminiAsk(prompt, { max, json, pdf }); }
+    catch (e) {                                   // every Gemini model/key is out of quota -> optional free Groq fallback
+      if (e.quota && GROQ_KEYS.length && !pdf) {
+        console.warn('[ai] Gemini quota used up on all models - falling back to Groq');
+        return groqAsk(prompt, { max, json });
+      }
+      throw e;
     }
-    const out = (d.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
-    if (!out) throw new Error('Gemini returned an empty response' + (d.promptFeedback?.blockReason ? ` (blocked: ${d.promptFeedback.blockReason})` : ''));
-    return out;
   }
+  if (PROVIDER === 'groq') return groqAsk(prompt, { max, json, pdf });
   if (PROVIDER === 'openai') {
     if (pdf) throw new Error('Scanned (image-only) PDFs need AI_PROVIDER=gemini or anthropic. Use a text-based PDF/DOCX instead.');
     const base = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
@@ -100,7 +180,7 @@ async function ask(prompt, { max = 4096, json = false, pdf = null } = {}) {
       { model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5', max_tokens: max, messages: [{ role: 'user', content }] });
     return (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
   }
-  throw new Error(`Unknown AI_PROVIDER "${PROVIDER}". Use gemini, openai or anthropic.`);
+  throw new Error(`Unknown AI_PROVIDER "${PROVIDER}". Use gemini, groq, openai or anthropic.`);
 }
 const parseJson = t => {
   const s = t.replace(/```json|```/g, '');
