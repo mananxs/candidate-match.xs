@@ -1,32 +1,35 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#020617">
 <meta name="robots" content="noindex,nofollow">
 <title>CandidateMatch Admin — Sign in</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f1b2d'/%3E%3Crect x='6' y='13' width='20' height='7' fill='%23f5c518'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%238b5cf6'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Crect x='7' y='13' width='18' height='6' rx='3' fill='%230b1020'/%3E%3Crect x='7' y='13' width='10' height='6' rx='3' fill='%23f5c518'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/theme.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
-  *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f1b2d;font:15px/1.55 "IBM Plex Sans",system-ui,sans-serif;color:#0f1b2d;padding:20px}
-  .box{background:#e8ecf1;border-top:6px solid #f5c518;border-radius:6px;padding:34px 32px;width:100%;max-width:400px;text-align:center}
-  .mark{display:flex;align-items:center;justify-content:center;gap:10px;font:800 22px "Bricolage Grotesque",system-ui,sans-serif;letter-spacing:-.02em}
-  .mark i{width:26px;height:26px;border-radius:5px;background:#0f1b2d;border:2px solid #f5c518;position:relative}
-  .mark i:after{content:"";position:absolute;left:3px;right:3px;top:9px;height:6px;background:#f5c518}
-  h1{margin:18px 0 4px;font:800 26px "Bricolage Grotesque",system-ui,sans-serif;letter-spacing:-.03em}
-  p{margin:0 0 22px;color:#53607a}
-  #g{display:flex;justify-content:center;min-height:44px}
-  #msg{margin:18px 0 0;font-size:13px;color:#53607a;min-height:20px}#msg.bad{color:#b4231a}
-  a{color:#53607a;font-size:12px}
+  body{min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:24px}
+  .auth{width:100%;max-width:432px;padding:8px;border-radius:32px}
+  .box{position:relative;padding:48px 32px 40px;text-align:center;border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015)),var(--surface);border:1px solid var(--line)}
+  .mark{display:flex;align-items:center;justify-content:center;gap:12px;font:800 22px var(--font-display);letter-spacing:-.02em;color:#fff}
+  .mark i{position:relative;width:32px;height:32px;border-radius:10px;background:var(--grad);box-shadow:0 0 24px rgba(139,92,246,.6)}
+  .mark i::before,.mark i::after{content:"";position:absolute;left:8px;top:13px;height:6px;border-radius:3px}
+  .mark i::before{right:8px;background:#0b1020}.mark i::after{width:10px;background:var(--hl)}
+  h1{margin:24px 0 8px;font-size:28px;font-weight:800;letter-spacing:-.03em;color:#fff}
+  p{margin:0 0 32px;color:var(--mute)}
+  #g{display:flex;justify-content:center;min-height:44px;color-scheme:light}
+  #msg{min-height:24px;margin:24px 0 0;font-size:13px;color:var(--faint)}#msg.bad{color:var(--red)}
 </style>
 </head><body>
-<div class="box">
+<div class="auth"><div class="box glow">
   <div class="mark"><i></i>CandidateMatch</div>
   <h1>Admin sign-in</h1>
   <p>Authorised administrators only.</p>
   <div id="g"></div>
   <div id="msg"></div>
-</div>
+</div></div>
 <script src="/admin-login.js"></script>
+<script src="/fx.js" defer></script>
 </body></html>
