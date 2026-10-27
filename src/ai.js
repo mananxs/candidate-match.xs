@@ -210,13 +210,14 @@ export async function extractJD(text) {
   if (JD_CACHE.has(jk)) return structuredClone(JD_CACHE.get(jk));
   const d = await askJson(`Extract structured requirements from this job description. It can be in ANY layout and may be noisy.
 Return ONLY JSON with exactly these keys:
-{"title":"","client":"","total_exp":null,"relevant_exp":null,"location":"","work_mode":"","employment_type":"","budget":"","current_ctc":"","expected_ctc":"","seniority":"","required_skills":[],"preferred_skills":[],"responsibilities":[],"technologies":[],"education":[],"certifications":[]}
+{"title":"","client":"","total_exp":null,"relevant_exp":null,"location":"","work_mode":"","employment_type":"","budget":"","current_ctc":"","expected_ctc":"","seniority":"","required_skills":[],"preferred_skills":[],"hands_on_skills":[],"responsibilities":[],"technologies":[],"education":[],"certifications":[]}
 Rules:
 - Use "" / null / [] when a detail is NOT stated. Never guess or invent.
 - total_exp = overall years required (number). relevant_exp = years required in the core skill/domain, ONLY if stated separately, else null.
 - work_mode must be one of ${ENUMS.work_mode.join(' | ')} or "". employment_type must be one of ${ENUMS.employment_type.join(' | ')} or "".
 - seniority e.g. Intern, Junior, Mid, Senior, Lead, Manager, Director.
 - required_skills = must-have / mandatory / core skills (short names, not sentences). preferred_skills = nice-to-have / plus / bonus. If the JD does not distinguish, put the central skills in required_skills.
+- hands_on_skills = ONLY the skills for which the JD explicitly asks for hands-on / practical / working / proven experience (e.g. "hands-on experience with Kubernetes", "must have worked on AWS"). Use exactly the same short names you used in required_skills / preferred_skills / technologies. [] if the JD never says so.
 - technologies = concrete tools/platforms/languages mentioned that are not already listed above.
 - responsibilities = short bullet strings. education = degrees/qualifications only. certifications = certifications only.
 
@@ -225,6 +226,8 @@ ${text.slice(0, 20000)}`);
   for (const k of Object.keys(ENUMS)) {
     d[k] = ENUMS[k].find(v => v.toLowerCase() === String(d[k] || '').toLowerCase()) || '';
   }
+  d.hands_on = Array.isArray(d.hands_on_skills) ? d.hands_on_skills : [];
+  delete d.hands_on_skills;
   if (JD_CACHE.size >= 100) JD_CACHE.delete(JD_CACHE.keys().next().value);
   JD_CACHE.set(jk, structuredClone(d));
   return d;
@@ -245,12 +248,13 @@ For EACH skill decide a status using SEMANTIC understanding, not keyword matchin
 "partial" = only an adjacent / weaker substitute (e.g. MySQL when PostgreSQL is required).
 "missing" = no real evidence.
 evidence = max 14 words, paraphrased from the resume (empty for missing).
+Skills marked [HANDS-ON] must be backed by practical use: for those add "h":true when the resume shows real hands-on work with it (built, deployed, administered, used in a project or job), "h":false when it is only listed / mentioned.
 Also return the candidate's full name, total years of RELEVANT experience (number or null) and a one-sentence fit summary.
-Return ONLY JSON: {"candidate":"","candidate_years":null,"summary":"","skills":[{"i":0,"status":"matched|partial","evidence":""}]}
+Return ONLY JSON: {"candidate":"","candidate_years":null,"summary":"","skills":[{"i":0,"status":"matched|partial","evidence":"","h":true}]}
 IMPORTANT: list ONLY the skills that are "matched" or "partial", each referenced by its number "i". Do NOT list missing skills - every skill you leave out is treated as missing.
 
 JD SKILLS (number. name):
-${skills.map((s, i) => `${i}. ${s.name}`).join('\n')}
+${skills.map((s, i) => `${i}. ${s.name}${s.hands_on ? ' [HANDS-ON]' : ''}`).join('\n')}
 
 RESUME:
 ${text.slice(0, 20000)}`);
@@ -258,7 +262,8 @@ ${text.slice(0, 20000)}`);
   (Array.isArray(d.skills) ? d.skills : []).forEach(s => { if (Number.isInteger(+s?.i) && s.i !== '' && s.i !== null) byIdx.set(+s.i, s); if (s?.name) by.set(String(s.name).toLowerCase(), s); });
   d.skills = skills.map((s, idx) => {
     const r = byIdx.get(idx) || by.get(s.name.toLowerCase());
-    return { name: s.name, type: s.type, status: ['matched', 'partial', 'missing'].includes(r?.status) ? r.status : 'missing', evidence: r?.evidence || '' };
+    const status = ['matched', 'partial', 'missing'].includes(r?.status) ? r.status : 'missing';
+    return { name: s.name, type: s.type, status, evidence: r?.evidence || '', ...(s.hands_on ? { hands_on: true, hands_on_shown: status !== 'missing' && r?.h !== false } : {}) };
   });
   if (ANALYSIS_CACHE.size >= CACHE_MAX) ANALYSIS_CACHE.delete(ANALYSIS_CACHE.keys().next().value);
   ANALYSIS_CACHE.set(ck, structuredClone(d));

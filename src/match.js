@@ -1,9 +1,15 @@
+// A skill needs hands-on experience when the JD's hands_on list names it (same word, or one contains the other).
+export function isHandsOn(jd, name) {
+  const k = String(name).trim().toLowerCase();
+  return (jd.hands_on || []).some(h => { const x = String(h).trim().toLowerCase(); return x && (x === k || (k.length > 2 && x.includes(k)) || (x.length > 2 && k.includes(x))); });
+}
+
 /** Builds the fixed skill list that every resume is scored against. */
 export function buildSkills(jd) {
   const seen = new Set(), out = [];
   const add = (arr, type) => (arr || []).forEach(n => {
     const k = String(n).trim().toLowerCase();
-    if (k && !seen.has(k)) { seen.add(k); out.push({ name: String(n).trim(), type }); }
+    if (k && !seen.has(k)) { seen.add(k); out.push({ name: String(n).trim(), type, ...(isHandsOn(jd, n) ? { hands_on: true } : {}) }); }
   });
   add(jd.required_skills, 'required');
   add(jd.preferred_skills, 'preferred');

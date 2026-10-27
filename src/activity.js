@@ -75,16 +75,22 @@ export function rangeWhere(from, to) {
   return Object.keys(w).length ? { created_at: w } : {};
 }
 
+/** Empty daily / weekly (Mon-Sun) / monthly periods, newest first: [{ key, from, to }] in local dates. */
+export function periodList(period, count) {
+  const today = localDate(Date.now()), list = [];
+  const first = { day: s => s, week: weekStart, month: monthStart }[period] || weekStart;
+  const step = { day: (s, n) => addDays(s, n), week: (s, n) => addDays(s, 7 * n), month: addMonths }[period] || ((s, n) => addDays(s, 7 * n));
+  let start = first(today);
+  for (let i = 0; i < count; i++) { list.push({ key: start, from: start, to: addDays(step(start, 1), -1) }); start = step(start, -1); }
+  return list;
+}
+/** Key of the period a timestamp falls in (matches periodList keys). */
+export const periodKey = (ms, period) => { const d = localDate(ms); return period === 'day' ? d : period === 'month' ? monthStart(d) : weekStart(d); };
+
 /** Weekly (Mon-Sun) or monthly buckets, newest first, empty periods included. */
 export async function buildReport(userId, period, count) {
-  const wk = period === 'week', step = wk ? 7 : 1, today = localDate(Date.now());
-  let start = wk ? weekStart(today) : monthStart(today);
-  const list = [];
-  for (let i = 0; i < count; i++) {
-    const next = wk ? addDays(start, 7) : addMonths(start, 1);
-    list.push({ key: start, from: start, to: addDays(next, -1), counts: emptyCounts() });
-    start = wk ? addDays(start, -7) : addMonths(start, -1);
-  }
+  const wk = period === 'week';
+  const list = periodList(wk ? 'week' : 'month', count).map(b => ({ ...b, counts: emptyCounts() }));
   const byKey = new Map(list.map(b => [b.key, b]));
   const rows = await prisma.activityLog.findMany({
     where: { user_id: userId, created_at: { gte: new Date(dayStart(list[list.length - 1].from)) } },
