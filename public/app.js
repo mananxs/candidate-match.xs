@@ -36,7 +36,7 @@ const FDEF = {
 const F = structuredClone(FDEF), SS = {};
 let TR = { period: 'week', data: null }, TAL = { rows: [], ran: false, busy: false }, DQ = { q: '', rows: null };
 
-const NAV = [['dash', 'Dashboard'], ['match', 'JD Matching'], ['bulk', 'Bulk Resume Processing'], ['cands', 'Candidates'], ['talent', 'Talent Search'], ['proc', 'Processed Resumes'], ['jds', 'Job Descriptions'], ['set', 'Settings']];
+const NAV = [['dash', 'Dashboard'], ['match', 'JD Matching'], ['bulk', 'Bulk Upload'], ['cands', 'Candidates'], ['talent', 'Talent Search'], ['proc', 'Processed Resumes'], ['jds', 'Job Descriptions'], ['set', 'Settings']];
 const ICON = {
   dash: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   match: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>',
