@@ -1,15 +1,23 @@
 // Admin portal API (mounted at /admin-api behind requireAdminAuth). Only emails listed in ADMIN_EMAILS can sign in.
-// Admins see activity METADATA (who did what, when, file names, scores). The only resume content they can open is that of
-// SHORTLISTED candidates (Shortlisted page: original resume, JD file, analysis, masked PDF) - never resumes that were not shortlisted.
+// Admins see activity METADATA only (who did what, when, file names, scores) - never resume text or masked text.
 import express from 'express';
 import { prisma, getSettings } from './db.js';
-import { ACTIONS, emptyCounts, addCount, buildReport, rangeWhere, isDate, logActivity, TIMEZONE } from './activity.js';
-import { pad, labelOf, analysisPdf, sendStored, csvCell, experienceGap } from './report.js';
+import { candView, labelOf, pad, safeName, fileExt, MIME } from './shared.js';
+import { buildAnalysisPdf } from './analysispdf.js';
 import { buildPdf } from './maskpdf.js';
-import { searchRouter } from './searches.js';
+import { ACTIONS, emptyCounts, addCount, buildReport, rangeWhere, isDate, logActivity, TIMEZONE } from './activity.js';
 
 const USER_PUB = { id: true, name: true, email: true, picture: true, created_at: true, last_login: true };
 const fmtDT = d => new Date(d).toLocaleString('en-GB', { timeZone: TIMEZONE, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+
+const SHORT_SEL = {
+  id: true, name: true, file_name: true, score: true, req_hit: true, req_total: true, analysis: true, shortlisted: true, shortlisted_at: true,
+  created_at: true, mask_status: true, jd_id: true, user_id: true,
+  jd: { select: { id: true, title: true, client: true } }, user: { select: { id: true, name: true, email: true, picture: true } },
+};
+const SHORT_ORDER = [{ shortlisted_at: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }];
+const slim = c => ({ ...candView(c), analysis: undefined });           // list rows: no analysis blob (fetched on "View analysis")
+const csvCell = v => { let s = String(v ?? ''); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
 
 export function adminRouter(h, bad) {
   const r = express.Router();
@@ -27,67 +35,6 @@ export function adminRouter(h, bad) {
     };
   };
 
-  /* ---------- Shortlisted candidates of every user (with job role, JD, resume and analysis) ---------- */
-  const SHORT_SEL = {
-    id: true, name: true, file_name: true, score: true, req_hit: true, req_total: true, analysis: true, shortlisted: true, shortlisted_at: true, created_at: true, mask_status: true, jd_id: true,
-    jd: { select: { id: true, title: true, client: true, file_name: true, total_exp: true, relevant_exp: true } },
-    user: { select: { id: true, name: true, email: true, picture: true } },
-  };
-  const shortWhere = q => {
-    const s = String(q.q || '').trim(), role = String(q.role || '').trim();
-    const w = { shortlisted: true, ...(Number(q.user_id) ? { user_id: Number(q.user_id) } : {}), ...(Number(q.min) ? { score: { gte: Number(q.min) } } : {}) };
-    if (role) w.jd = { title: { contains: role, mode: 'insensitive' } };
-    if (s) w.OR = [{ name: { contains: s, mode: 'insensitive' } }, { file_name: { contains: s, mode: 'insensitive' } }];
-    const rg = rangeWhere(q.from, q.to).created_at;
-    if (rg) w.AND = [{ OR: [{ shortlisted_at: rg }, { shortlisted_at: null, created_at: rg }] }];
-    return w;
-  };
-  const shortOut = c => ({ ...c, label: labelOf(c), code: pad('CAND', c.id), jd_code: pad('JD', c.jd_id), job_role: c.jd?.title || null, exp: experienceGap(c.analysis) });
-  const shortList = (q, take) => prisma.candidate.findMany({ where: shortWhere(q), select: SHORT_SEL, orderBy: [{ shortlisted_at: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }], take });
-
-  r.get('/shortlisted', h(async (req, res) => res.json((await shortList(req.query, 1000)).map(shortOut))));
-  r.get('/shortlisted.csv', h(async (req, res) => {
-    const rows = (await shortList(req.query, 20000)).map(shortOut);
-    const sk = (c, f) => (c.analysis?.skills || []).filter(f).map(s => s.name + (s.hands_on ? (s.status === 'missing' ? ' [hands-on req.]' : s.hands_on_shown ? ' [hands-on]' : ' [hands-on not shown]') : '')).join('; ');
-    const lines = [['Shortlisted on', 'Recruiter', 'Recruiter email', 'Candidate', 'Resume file', 'Job role', 'JD', 'Client', 'ATS %', 'Required covered', 'Required exp (yrs)', 'Candidate exp (yrs)', 'Missing exp (yrs)', 'Matched skills', 'Preferred matched', 'Missing skills', 'Summary'].map(csvCell).join(',')];
-    for (const c of rows) lines.push([fmtDT(c.shortlisted_at || c.created_at), c.user?.name || '', c.user?.email || '', c.name || c.label, c.file_name, c.job_role || '', c.jd_code, c.jd?.client || '', c.score, `${c.req_hit}/${c.req_total}`,
-      c.exp.required ?? '', c.exp.candidate ?? '', c.exp.missing || '', sk(c, s => s.type !== 'preferred' && s.status !== 'missing'), sk(c, s => s.type === 'preferred' && s.status !== 'missing'), sk(c, s => s.status === 'missing'), c.analysis?.summary || ''].map(csvCell).join(','));
-    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="shortlisted-candidates.csv"' });
-    res.send('\uFEFF' + lines.join('\r\n'));
-  }));
-  // Files of ONE shortlisted candidate. Anything not shortlisted is 404 for admins.
-  const shortOne = async (req, extra = {}) => {
-    const c = await prisma.candidate.findFirst({ where: { id: Number(req.params.id) || 0, shortlisted: true }, select: { ...SHORT_SEL, ...extra } });
-    if (!c) throw bad('Shortlisted candidate not found', 404);
-    return c;
-  };
-  r.get('/candidates/:id', h(async (req, res) => res.json(shortOut(await shortOne(req)))));
-  r.get('/candidates/:id/resume', h(async (req, res) => {
-    const c = await shortOne(req, { file_type: true, file_data: true, resume_text: true });
-    sendStored(res, { name: c.file_name, type: c.file_type, data: c.file_data, text: c.resume_text });
-  }));
-  r.get('/candidates/:id/jd', h(async (req, res) => {
-    const c = await shortOne(req);
-    const jd = await prisma.jd.findUnique({ where: { id: c.jd_id }, select: { id: true, title: true, file_name: true, file_type: true, file_data: true, raw_text: true } });
-    if (!jd) throw bad('JD not found', 404);
-    sendStored(res, { name: jd.file_name || `${pad('JD', jd.id)} ${jd.title || ''}`.trim(), type: jd.file_type, data: jd.file_data, text: jd.raw_text });
-  }));
-  r.get('/candidates/:id/analysis.pdf', h(async (req, res) => {
-    const c = await shortOne(req);
-    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${labelOf(c).replace(/[^\w-]+/g, '')}-${pad('JD', c.jd_id)}-analysis.pdf"` });
-    res.send(await analysisPdf(c, c.jd, c.user ? `${c.user.name || ''} <${c.user.email}>` : ''));
-  }));
-  r.get('/candidates/:id/masked.pdf', h(async (req, res) => {
-    const c = await shortOne(req, { masked_text: true, user_id: true });
-    if (!c.masked_text) throw bad('This resume has not been masked yet.', 404);
-    const s = await getSettings(c.user_id);
-    const pdf = await buildPdf(c.masked_text, { code: labelOf(c), watermark: true, wmText: s.watermark_text, logo: s.logo_b64 ? { buf: Buffer.from(s.logo_b64, 'base64'), type: s.logo_type } : null });
-    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${labelOf(c).replace(/[^\w-]+/g, '')}-masked.pdf"` });
-    res.send(pdf);
-  }));
-
-  r.use('/searches', searchRouter(h, bad, req => ({ admin_email: req.admin.email })));
-
   /* Dashboard: headline numbers + every user with their totals */
   r.get('/overview', h(async (req, res) => {
     const now = Date.now(), d7 = new Date(now - 7 * 864e5), d30 = new Date(now - 30 * 864e5);
@@ -98,7 +45,7 @@ export function adminRouter(h, bad) {
       prisma.activityLog.count({ where: { created_at: { gte: d30 } } }),
       prisma.activityLog.groupBy({ by: ['user_id'], where: { created_at: { gte: d7 } } }),
       prisma.candidate.count({ where: { shortlisted: true } }),
-      shortList({}, 8),
+      prisma.candidate.findMany({ where: { shortlisted: true }, select: SHORT_SEL, orderBy: SHORT_ORDER, take: 10 }),
     ]);
     const per = new Map();
     for (const g of groups) {
@@ -110,7 +57,7 @@ export function adminRouter(h, bad) {
     res.json({
       tz: TIMEZONE, actions: ACTIONS,
       totals: { users: users.length, active_7d: active7.length, actions_7d: a7, actions_30d: a30, shortlisted: shortTotal },
-      shortlisted: shortRecent.map(c => ({ ...shortOut(c), analysis: undefined })),
+      shortlisted: shortRecent.map(slim),
       users: users.map(u => ({ ...u, counts: per.get(u.id)?.counts || emptyCounts(), last_activity: per.get(u.id)?.last || null })),
     });
   }));
@@ -134,10 +81,10 @@ export function adminRouter(h, bad) {
       prisma.activityLog.groupBy({ by: ['action'], where: { user_id: id }, _count: { _all: true } }),
       prisma.jd.count({ where: { user_id: id } }), prisma.candidate.count({ where: { user_id: id } }),
       prisma.candidate.count({ where: { user_id: id, mask_status: 'masked' } }), prisma.candidate.count({ where: { user_id: id, shortlisted: true } }),
-      shortList({ user_id: id }, 200),
+      prisma.candidate.findMany({ where: { user_id: id, shortlisted: true }, select: SHORT_SEL, orderBy: SHORT_ORDER, take: 200 }),
     ]);
     const counts = emptyCounts(); groups.forEach(g => addCount(counts, g.action, g._count._all));
-    res.json({ user, counts, stored: { jds, resumes, masked, shortlisted }, shortlisted: shortRows.map(c => ({ ...shortOut(c), analysis: undefined })), tz: TIMEZONE, actions: ACTIONS });
+    res.json({ user, counts, stored: { jds, resumes, masked, shortlisted }, shortlisted: shortRows.map(slim), tz: TIMEZONE, actions: ACTIONS });
   }));
 
   /* Weekly (Mon-Sun) / monthly report for one user */
@@ -152,7 +99,7 @@ export function adminRouter(h, bad) {
   r.get('/users/:id/activity.csv', h(async (req, res) => {
     const id = uid(req), user = await userOr404(id);
     const rows = await prisma.activityLog.findMany({ where: actWhere(req, id), orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 20000 });
-    const cell = csvCell;
+    const cell = v => { let s = String(v ?? ''); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
     const lines = [['Date/time (' + TIMEZONE + ')', 'User', 'Email', 'Action', 'Item', 'Details'].map(cell).join(',')];
     for (const x of rows) lines.push([fmtDT(x.created_at), user.name || '', user.email, x.action, x.label || '', x.detail ? JSON.stringify(x.detail) : ''].map(cell).join(','));
     res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="activity-user-${id}${isDate(req.query.from) ? '-from-' + req.query.from : ''}${isDate(req.query.to) ? '-to-' + req.query.to : ''}.csv"` });
@@ -175,6 +122,93 @@ export function adminRouter(h, bad) {
     if (String(req.body?.confirm || '').trim().toLowerCase() !== user.email.toLowerCase()) throw bad('Type the user\'s email to confirm.');
     await prisma.user.delete({ where: { id } });
     console.log(`[admin] ${req.admin.email} deleted user ${user.email} (#${id})`);
+    res.json({ ok: true });
+  }));
+
+  /* ---------- Shortlisted candidates of every recruiter ---------- */
+  const shortWhere = req => {
+    const { user_id, q, role, min, from, to } = req.query, w = { shortlisted: true };
+    if (Number.isInteger(Number(user_id)) && Number(user_id) > 0) w.user_id = Number(user_id);
+    if (Number(min) > 0) w.score = { gte: Number(min) };
+    if (q && String(q).trim()) w.OR = [{ name: { contains: String(q).trim(), mode: 'insensitive' } }, { file_name: { contains: String(q).trim(), mode: 'insensitive' } }];
+    if (role && String(role).trim()) w.jd = { title: { contains: String(role).trim(), mode: 'insensitive' } };
+    const rw = rangeWhere(from, to).created_at; if (rw) w.shortlisted_at = rw;
+    return w;
+  };
+  r.get('/shortlisted', h(async (req, res) => {
+    const rows = await prisma.candidate.findMany({ where: shortWhere(req), select: SHORT_SEL, orderBy: SHORT_ORDER, take: 500 });
+    res.json(rows.map(slim));
+  }));
+  r.get('/shortlisted.csv', h(async (req, res) => {
+    const rows = await prisma.candidate.findMany({ where: shortWhere(req), select: SHORT_SEL, orderBy: SHORT_ORDER, take: 5000 });
+    const names = (a, st) => (a?.skills || []).filter(x => x.status === st).map(x => x.name).join('; ');
+    const head = ['Shortlisted on', 'Candidate', 'File', 'Recruiter', 'Recruiter email', 'Job role', 'JD', 'Client', 'ATS %', 'Required hit', 'Required total', 'Required exp (yrs)', 'Candidate exp (yrs)', 'Exp missing (yrs)', 'Matched skills', 'Partial skills', 'Missing skills', 'Summary'];
+    const lines = [head.map(csvCell).join(',')];
+    for (const c of rows) {
+      const e = candView(c).exp, a = c.analysis;
+      lines.push([c.shortlisted_at ? fmtDT(c.shortlisted_at) : '', labelOf(c), c.file_name, c.user?.name, c.user?.email, c.jd?.title, pad('JD', c.jd_id), c.jd?.client, c.score, c.req_hit, c.req_total,
+        e.required, e.candidate, e.missing, names(a, 'matched'), names(a, 'partial'), names(a, 'missing'), a?.summary].map(csvCell).join(','));
+    }
+    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="shortlisted-candidates.csv"' });
+    res.send('\uFEFF' + lines.join('\r\n'));
+  }));
+
+  // Files / analysis of a SHORTLISTED candidate (admins can only open shortlisted profiles, never the rest of a recruiter's pool)
+  const shortOr404 = async (req, extra = {}) => {
+    const n = Number(req.params.id); if (!Number.isInteger(n)) throw bad('Invalid candidate.');
+    const c = await prisma.candidate.findFirst({ where: { id: n, shortlisted: true }, select: { ...SHORT_SEL, ...extra } });
+    if (!c) throw bad('Shortlisted candidate not found', 404);
+    return c;
+  };
+  r.get('/candidates/:id', h(async (req, res) => res.json(candView(await shortOr404(req)))));
+  r.get('/candidates/:id/resume', h(async (req, res) => {
+    const c = await shortOr404(req, { file_type: true, file_data: true, resume_text: true });
+    if (!c.file_data) {                                           // analysed before original files were stored -> fall back to the extracted text
+      if (!c.resume_text) throw bad('No resume file stored for this candidate.', 404);
+      res.set({ 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="${safeName(labelOf(c))}-resume.txt"` });
+      return res.send(c.resume_text);
+    }
+    res.set({ 'Content-Type': MIME[c.file_type] || 'application/octet-stream', 'Content-Disposition': `attachment; filename="${safeName(c.file_name, 'resume')}"` });
+    res.send(Buffer.from(c.file_data));
+  }));
+  r.get('/candidates/:id/jd', h(async (req, res) => {
+    const c = await shortOr404(req);
+    const jd = await prisma.jd.findUnique({ where: { id: c.jd_id }, select: { title: true, file_name: true, file_type: true, file_data: true, raw_text: true } });
+    if (!jd) throw bad('JD not found', 404);
+    if (jd.file_data) {
+      res.set({ 'Content-Type': MIME[jd.file_type] || 'application/octet-stream', 'Content-Disposition': `attachment; filename="${safeName(jd.file_name, 'jd')}"` });
+      return res.send(Buffer.from(jd.file_data));
+    }
+    res.set({ 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="${safeName(jd.title, 'jd')}.txt"` });
+    res.send(jd.raw_text || '');
+  }));
+  r.get('/candidates/:id/analysis.pdf', h(async (req, res) => {
+    const c = await shortOr404(req);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${safeName(labelOf(c))}-analysis.pdf"` });
+    res.send(await buildAnalysisPdf(candView(c), c.jd?.title));
+  }));
+  r.get('/candidates/:id/masked.pdf', h(async (req, res) => {
+    const c = await shortOr404(req, { masked_text: true });
+    if (!c.masked_text) throw bad('This resume has not been masked yet.', 404);
+    const s = await getSettings(c.user_id);
+    const pdf = await buildPdf(c.masked_text, { code: labelOf(c), watermark: true, wmText: s.watermark_text, logo: s.logo_b64 ? { buf: Buffer.from(s.logo_b64, 'base64'), type: s.logo_type } : null });
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${safeName(labelOf(c))}-masked.pdf"` });
+    res.send(pdf);
+  }));
+
+  /* ---------- Admin saved searches (scopes a_short, a_log; stored per admin e-mail) ---------- */
+  r.get('/searches', h(async (req, res) => {
+    res.json(await prisma.savedSearch.findMany({ where: { admin_email: req.admin.email, scope: String(req.query.scope || '') }, select: { id: true, scope: true, name: true, query: true }, orderBy: { id: 'asc' } }));
+  }));
+  r.post('/searches', h(async (req, res) => {
+    const scope = String(req.body.scope || ''), name = String(req.body.name || '').trim().slice(0, 60);
+    if (!/^a_[a-z]{1,20}$/.test(scope)) throw bad('Invalid search scope.');
+    if (!name) throw bad('Give the search a name.');
+    const query = req.body.query && typeof req.body.query === 'object' && !Array.isArray(req.body.query) ? req.body.query : {};
+    res.json(await prisma.savedSearch.create({ data: { admin_email: req.admin.email, scope, name, query }, select: { id: true, scope: true, name: true, query: true } }));
+  }));
+  r.delete('/searches/:id', h(async (req, res) => {
+    await prisma.savedSearch.deleteMany({ where: { id: Number(req.params.id), admin_email: req.admin.email } });
     res.json({ ok: true });
   }));
 

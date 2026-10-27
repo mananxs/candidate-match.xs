@@ -11,8 +11,9 @@ AI resume ↔ JD matching, ranking and anonymization.
 5. `npx prisma db push` (or `npx prisma migrate dev --name accounts` if you use migrations) ← adds the `users` table and per-account ownership columns
 6. `npm start` → http://localhost:3000 (landing page) → sign in → `/app`
 
-**Accounts:** only verified `@gmail.com` Google accounts can sign in. Every account has its own JDs, candidates and settings. Rows created before accounts existed have no owner and are not shown to anyone.
+**Accounts:** only verified `@gmail.com` (and `@xsassociates.com` Workspace) Google accounts can sign in. Every account has its own JDs, candidates and settings. Rows created before accounts existed have no owner and are not shown to anyone.
 
+6b. After pulling this version run `npx prisma db push` again (adds the `hands_on` JD column, `saved_searches` table and file columns).
 7. **Admin portal** – add your Gmail to `ADMIN_EMAILS` in `.env` (comma-separated for several admins), restart, run `npx prisma db push` once (adds the `activity_logs` table) and, optionally, `npm run db:backfill-activity` to import your existing JDs / resumes into the history.
 
 Production deploys: `npm install && npm run db:deploy` (applies committed migrations), then `npm start`.
@@ -30,7 +31,7 @@ Inspect data any time with `npm run db:studio`.
 Open **`/admin`** (e.g. http://localhost:3000/admin). It has its own sign-in page, its own session cookie (8 h) and its own API (`/admin-api`), and only Gmail addresses listed in `ADMIN_EMAILS` can sign in. An admin session cannot open the HR workspace (`/app`) and an HR session cannot open the admin portal. The HR site has no link to it.
 - **Dashboard:** headline numbers, every user (click one to open them) and the **Activity Log** of all accounts, filterable by user, activity and dates.
 - **User dashboard:** all-time totals (JDs uploaded, resumes analyzed / AI matched, masked, masking failed, PDFs downloaded, shortlisted, deleted, sign-ins), a **weekly (Mon–Sun) and monthly record with dates**, the full dated activity log (date / activity filters, **CSV download**), **Delete all data of this user**, and **Delete user** (removes the email, account, data and history entirely).
-- The log stores metadata only (who, what, when, file name, score) – never resume text. It is a separate table, so history survives deleting JDs / resumes.
+- The log stores metadata only (who, what, when, file name, score) – never resume text. Admins can open the analysis, original resume / JD and masked PDF of **shortlisted** candidates only (Shortlisted page); nothing else in a recruiter's pool is exposed. It is a separate table, so history survives deleting JDs / resumes.
 - Dates use `ADMIN_TZ` (default `Asia/Kolkata`). Code: `src/admin.js`, `public/admin.js`, `views/admin*.html`.
 
 ## Layout
@@ -43,7 +44,7 @@ public/index.html     landing page     views/app.html  signed-in workspace (publ
 ```
 
 ## Deploy
-Any Node host (Render, Railway, Fly.io, a VPS): set the three env vars, build command `npm install`, start `npm start`, and run `npm run migrate` once.
+Any Node host (Render, Railway, Fly.io, a VPS): set the three env vars, build command `npm install`, start `npm start`, and run `npm run db:deploy` (or `npx prisma db push`) once.
 Also set `NODE_ENV=production` and `SESSION_SECRET`, and add the production URL to the Google OAuth *Authorized JavaScript origins*.
 
 ## Notes

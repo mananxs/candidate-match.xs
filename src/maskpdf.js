@@ -18,7 +18,7 @@ function wrap(t, font, size, maxW) {
 }
 
 /** Renders the (editable) masked text into a clean ATS-style PDF, optionally watermarked with the XS logo. */
-export async function buildPdf(text, { code, watermark, wmText, logo, footer = 'Anonymized resume' }) {
+export async function buildPdf(text, { code, watermark, wmText, logo }) {
   const doc = await PDFDocument.create();
   const reg = await doc.embedFont(StandardFonts.Helvetica), bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const W = 595, H = 842, M = 50, maxW = W - 2 * M;
@@ -69,7 +69,7 @@ export async function buildPdf(text, { code, watermark, wmText, logo, footer = '
         mark(p, M + 8, 30, 16, 0.85);
       }
     }
-    const f = `${footer}  \u00B7  ${code}${wmText && watermark ? '  \u00B7  ' + wmText : ''}  \u00B7  Page ${i + 1} of ${pages.length}`;
+    const f = `Anonymized resume  \u00B7  ${code}${wmText && watermark ? '  \u00B7  ' + wmText : ''}  \u00B7  Page ${i + 1} of ${pages.length}`;
     p.drawText(safe(f), { x: M + (watermark ? 26 : 0), y: 26, size: 8, font: reg, color: grey });
   });
   return Buffer.from(await doc.save());

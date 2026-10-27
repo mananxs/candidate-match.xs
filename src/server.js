@@ -9,9 +9,9 @@ import { extractJD, analyzeResume, maskResume } from './ai.js';
 import { score, requiredYears } from './match.js';
 import { buildPdf } from './maskpdf.js';
 import { readSession, startSession, endSession, requireAuth, verifyGmail, readAdminSession, startAdminSession, endAdminSession, requireAdminAuth } from './auth.js';
-import { logActivity, logActivities, isAdminEmail, periodList, periodKey, TIMEZONE } from './activity.js';
-import { pad, labelOf, analysisPdf, sendStored } from './report.js';
-import { searchRouter } from './searches.js';
+import { logActivity, logActivities, isAdminEmail, makeBuckets } from './activity.js';
+import { pad, labelOf, candView, hasTerm, fileExt, MIME, safeName } from './shared.js';
+import { buildAnalysisPdf } from './analysispdf.js';
 import { adminRouter } from './admin.js';
 
 const app = express();
@@ -70,7 +70,7 @@ app.get('/api/me', h(async (req, res) => {
 /* ---------- helpers ---------- */
 const sel = keys => Object.fromEntries(keys.map(k => [k, true]));
 const jdOut = r => r && ({ ...r, code: pad('JD', r.id), cand_count: r._count?.candidates, _count: undefined });
-// Candidates are shown everywhere by FIRST NAME only (never the surname). No name found -> CAND-001 style code (labelOf in report.js).
+// Candidates are shown everywhere by FIRST NAME only (never the surname). No name found -> CAND-001 style code.
 const cOut = r => r && ({ ...r, code: pad('CAND', r.id), label: labelOf(r) });
 const id = req => Number(req.params.id);
 const mine = req => ({ user_id: req.user.id });   // every query is limited to the signed-in HR's own rows
@@ -84,9 +84,8 @@ const norm = (k, v) => LISTS.has(k) ? (Array.isArray(v) ? v.map(x => String(x).t
   : (v == null ? null : String(v).trim() || null);
 const jdData = o => Object.fromEntries(JD_FIELDS.map(k => [k, norm(k, o[k])]));
 
-const JD_SEL = sel(['id', ...JD_FIELDS, 'status', 'created_at', 'file_name']);       // everything except raw_text / file bytes
+const JD_SEL = sel(['id', ...JD_FIELDS, 'status', 'created_at']);       // everything except raw_text
 const CAND_SEL = sel(['id', 'file_name', 'jd_id', 'name', 'analysis', 'score', 'req_hit', 'req_total', 'shortlisted', 'shortlisted_at', 'mask_status', 'mask_error', 'created_at']);
-const MATCH_JD = sel(['id', 'title', 'required_skills', 'preferred_skills', 'technologies', 'hands_on', 'relevant_exp', 'total_exp']);   // what analysis needs
 
 /* ---------------- JDs ---------------- */
 app.get('/api/jds', h(async (req, res) => {
@@ -99,13 +98,22 @@ app.get('/api/jds/:id', h(async (req, res) => {
   res.json(jdOut(jd));
 }));
 
+app.get('/api/jds/:id/file', h(async (req, res) => {              // the JD as it was uploaded (or the pasted text)
+  const jd = await prisma.jd.findFirst({ where: { id: id(req), ...mine(req) }, select: { title: true, file_name: true, file_type: true, file_data: true, raw_text: true } });
+  if (!jd) throw bad('JD not found', 404);
+  if (jd.file_data) {
+    res.set({ 'Content-Type': MIME[jd.file_type] || 'application/octet-stream', 'Content-Disposition': `attachment; filename="${safeName(jd.file_name, 'jd')}"` });
+    return res.send(Buffer.from(jd.file_data));
+  }
+  res.set({ 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="${safeName(jd.title, 'jd')}.txt"` });
+  res.send(jd.raw_text || '');
+}));
 // Upload (or paste) a JD -> AI fills every field -> returned as a draft for review / manual completion.
 app.post('/api/jds/extract', up.single('file'), h(async (req, res) => {
   const text = req.file ? await fileToText(req.file) : String(req.body.text || '').trim();
   if (text.length < 40) throw bad('Provide a JD file or paste at least a few lines of text.');
   const d = await extractJD(text);
-  const file = req.file ? { file_name: req.file.originalname, file_type: req.file.mimetype, file_data: req.file.buffer } : {};
-  const jd = await prisma.jd.create({ data: { ...jdData(d), ...file, raw_text: text, status: 'draft', user_id: req.user.id }, select: JD_SEL });
+  const jd = await prisma.jd.create({ data: { ...jdData(d), raw_text: text, status: 'draft', user_id: req.user.id, ...(req.file ? { file_name: req.file.originalname, file_type: fileExt(req.file.originalname), file_data: req.file.buffer } : {}) }, select: JD_SEL });
   logActivity(req.user.id, 'jd_extracted', { entity: 'jd', entityId: jd.id, label: pad('JD', jd.id), detail: { title: jd.title, file: req.file?.originalname || 'pasted text' } });
   res.json(jdOut(jd));
 }));
@@ -113,11 +121,6 @@ app.put('/api/jds/:id', h(async (req, res) => {
   const jd = await prisma.jd.update({ where: { id: id(req), ...mine(req) }, data: { ...jdData(req.body), status: 'saved' }, select: JD_SEL });
   logActivity(req.user.id, 'jd_saved', { entity: 'jd', entityId: jd.id, label: pad('JD', jd.id), detail: { title: jd.title } });
   res.json(jdOut(jd));
-}));
-app.get('/api/jds/:id/file', h(async (req, res) => {        // original JD file (or its text when it was pasted)
-  const jd = await prisma.jd.findFirst({ where: { id: id(req), ...mine(req) }, select: { id: true, title: true, file_name: true, file_type: true, file_data: true, raw_text: true } });
-  if (!jd) throw bad('JD not found', 404);
-  sendStored(res, { name: jd.file_name || `${pad('JD', jd.id)} ${jd.title || ''}`.trim(), type: jd.file_type, data: jd.file_data, text: jd.raw_text });
 }));
 app.delete('/api/jds/:id', h(async (req, res) => {
   const jd = await prisma.jd.findFirst({ where: { id: id(req), ...mine(req) }, select: { id: true, title: true, _count: { select: { candidates: true } } } });
@@ -137,7 +140,7 @@ app.get('/api/candidates', h(async (req, res) => {
 
 // One resume per request (the client loops) -> no long-running requests.
 app.post('/api/candidates', up.single('file'), h(async (req, res) => {
-  const jd = await prisma.jd.findFirst({ where: { id: Number(req.body.jdId), ...mine(req) }, select: MATCH_JD });
+  const jd = await prisma.jd.findFirst({ where: { id: Number(req.body.jdId), ...mine(req) } });
   if (!jd) throw bad('Select or save a JD first.');
   if (!req.file) throw bad('No file uploaded.');
   let row;
@@ -147,7 +150,8 @@ app.post('/api/candidates', up.single('file'), h(async (req, res) => {
     analysis.required_years = requiredYears(jd, settings.min_exp);
     const sc = score(analysis, analysis.required_years);
     row = await prisma.candidate.create({
-      data: { file_name: req.file.originalname, file_type: req.file.mimetype, file_data: req.file.buffer, resume_text: text, jd_id: jd.id, user_id: req.user.id, name: analysis.candidate || null, analysis, score: sc.score, req_hit: sc.req_hit, req_total: sc.req_total },
+      data: { file_name: req.file.originalname, resume_text: text, jd_id: jd.id, user_id: req.user.id, name: analysis.candidate || null, analysis, score: sc.score, req_hit: sc.req_hit, req_total: sc.req_total,
+        file_type: fileExt(req.file.originalname), file_data: req.file.buffer },
       select: CAND_SEL,
     });
   } catch (e) {
@@ -158,82 +162,10 @@ app.post('/api/candidates', up.single('file'), h(async (req, res) => {
   res.json(cOut(row));
 }));
 app.patch('/api/candidates/:id', h(async (req, res) => {
-  const on = !!req.body.shortlisted;
-  const row = await prisma.candidate.update({ where: { id: id(req), ...mine(req) }, data: { shortlisted: on, shortlisted_at: on ? new Date() : null }, select: { ...CAND_SEL, jd: { select: { title: true } } } });
-  logActivity(req.user.id, row.shortlisted ? 'shortlisted' : 'unshortlisted', { entity: 'candidate', entityId: row.id, label: labelOf(row), detail: { file: row.file_name, jd_id: row.jd_id, jd_code: pad('JD', row.jd_id), jd_title: row.jd?.title } });
-  res.json(cOut({ ...row, jd: undefined }));
-}));
-app.get('/api/candidates/:id', h(async (req, res) => {
-  const c = await prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: CAND_SEL });
-  if (!c) throw bad('Candidate not found', 404);
-  res.json(cOut(c));
-}));
-app.get('/api/candidates/:id/file', h(async (req, res) => {   // original resume as uploaded
-  const c = await prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { file_name: true, file_type: true, file_data: true, resume_text: true } });
-  if (!c) throw bad('Candidate not found', 404);
-  sendStored(res, { name: c.file_name, type: c.file_type, data: c.file_data, text: c.resume_text });
-}));
-app.get('/api/candidates/:id/analysis.pdf', h(async (req, res) => {
-  const c = await prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { ...CAND_SEL, jd: { select: { id: true, title: true } } } });
-  if (!c) throw bad('Candidate not found', 404);
-  res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${labelOf(c).replace(/[^\w-]+/g, '')}-analysis.pdf"` });
-  res.send(await analysisPdf(c, c.jd));
-}));
-// Talent pool: re-score a candidate already in the system against another JD (no re-upload needed).
-app.post('/api/candidates/:id/rematch', h(async (req, res) => {
-  const [c, jd, settings] = await Promise.all([
-    prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { id: true, file_name: true, file_type: true, file_data: true, resume_text: true } }),
-    prisma.jd.findFirst({ where: { id: Number(req.body.jdId), ...mine(req), status: 'saved' }, select: MATCH_JD }),
-    getSettings(req.user.id),
-  ]);
-  if (!c?.resume_text) throw bad('Candidate not found', 404);
-  if (!jd) throw bad('Choose a saved JD.');
-  const dup = await prisma.candidate.findFirst({ where: { ...mine(req), jd_id: jd.id, file_name: c.file_name, resume_text: c.resume_text }, select: CAND_SEL });
-  if (dup) return res.json({ ...cOut(dup), existing: true });
-  const analysis = await analyzeResume(jd, c.resume_text);
-  analysis.required_years = requiredYears(jd, settings.min_exp);
-  const sc = score(analysis, analysis.required_years);
-  const row = await prisma.candidate.create({
-    data: { file_name: c.file_name, file_type: c.file_type, file_data: c.file_data, resume_text: c.resume_text, jd_id: jd.id, user_id: req.user.id, name: analysis.candidate || null, analysis, score: sc.score, req_hit: sc.req_hit, req_total: sc.req_total },
-    select: CAND_SEL,
-  });
-  logActivity(req.user.id, 'resume_analyzed', { entity: 'candidate', entityId: row.id, label: labelOf(row), detail: { file: row.file_name, jd_id: jd.id, jd_title: jd.title, jd_code: pad('JD', jd.id), score: row.score, req_hit: row.req_hit, req_total: row.req_total, rematch_of: c.id } });
+  const row = await prisma.candidate.update({ where: { id: id(req), ...mine(req) }, data: { shortlisted: !!req.body.shortlisted, shortlisted_at: req.body.shortlisted ? new Date() : null }, select: CAND_SEL });
+  logActivity(req.user.id, row.shortlisted ? 'shortlisted' : 'unshortlisted', { entity: 'candidate', entityId: row.id, label: labelOf(row), detail: { file: row.file_name, jd_id: row.jd_id } });
   res.json(cOut(row));
 }));
-
-/* ---------------- Talent search: find people already analyzed (for any JD) who have these skills ----------------
-   A term counts as found when the AI matched a skill of that name OR the resume text contains it. One row per person (best match). */
-const words = v => String(v || '').split(/[\n,;]+/).map(x => x.trim()).filter(Boolean).slice(0, 30);
-const escRe = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const termRe = t => new RegExp(`(^|[^a-z0-9])${escRe(t.toLowerCase())}($|[^a-z0-9])`, 'i');
-app.get('/api/talent', h(async (req, res) => {
-  const q = req.query, terms = words(q.skills), min = Number(q.min) || 0, name = String(q.q || '').trim().toLowerCase(), role = String(q.role || '').trim().toLowerCase();
-  const rows = await prisma.candidate.findMany({
-    where: { ...mine(req), ...(q.short === '1' ? { shortlisted: true } : {}), ...(min ? { score: { gte: min } } : {}) },
-    select: { ...CAND_SEL, resume_text: !!terms.length, jd: { select: { id: true, title: true } } }, orderBy: { id: 'desc' }, take: 5000,
-  });
-  const res1 = [];
-  for (const r of rows) {
-    if (name && !String(r.name || '').toLowerCase().includes(name) && !String(r.file_name || '').toLowerCase().includes(name)) continue;
-    if (role && !String(r.jd?.title || '').toLowerCase().includes(role)) continue;
-    const got = (r.analysis?.skills || []).filter(s => s.status !== 'missing').map(s => s.name.toLowerCase());
-    const found = terms.filter(t => { const re = termRe(t); return got.some(g => g === t.toLowerCase() || re.test(g)) || re.test(r.resume_text || ''); });
-    if (terms.length && (q.mode === 'all' ? found.length < terms.length : !found.length)) continue;
-    res1.push({ ...cOut({ ...r, resume_text: undefined, jd: undefined }), job_role: r.jd?.title || null, found, hits: found.length });
-  }
-  const best = new Map();                                  // the same resume analyzed for several JDs -> keep its best row, list the roles
-  for (const r of res1) {
-    const k = (r.name || r.file_name || r.code).toLowerCase();
-    const b = best.get(k);
-    if (!b) { best.set(k, { ...r, roles: [r.job_role].filter(Boolean) }); continue; }
-    if (r.job_role && !b.roles.includes(r.job_role)) b.roles.push(r.job_role);
-    if (r.hits > b.hits || (r.hits === b.hits && r.score > b.score)) best.set(k, { ...r, roles: b.roles, shortlisted: b.shortlisted || r.shortlisted });
-  }
-  res.json([...best.values()].sort((a, b) => b.hits - a.hits || b.score - a.score).slice(0, 300).map(r => ({ ...r, analysis: undefined, top: (r.analysis?.skills || []).filter(s => s.status === 'matched').slice(0, 8).map(s => s.name), summary: r.analysis?.summary || '' })));
-}));
-
-/* ---------------- Saved searches (per panel) ---------------- */
-app.use('/api/searches', searchRouter(h, bad, req => ({ user_id: req.user.id })));
 const delInfo = c => ({ entity: 'candidate', entityId: c.id, label: labelOf(c), detail: { file: c.file_name, jd_id: c.jd_id } });
 app.delete('/api/candidates/:id', h(async (req, res) => {
   const c = await prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { id: true, name: true, file_name: true, jd_id: true } });
@@ -249,6 +181,119 @@ app.post('/api/candidates/bulk-delete', h(async (req, res) => {
   const r = await prisma.candidate.deleteMany({ where: { id: { in: ids }, ...mine(req) } });
   if (r.count) logActivities(req.user.id, 'candidate_deleted', gone.map(c => ({ ...delInfo(c), detail: { ...delInfo(c).detail, bulk: true } })));
   res.json({ ok: true, deleted: r.count });
+}));
+
+
+/* ---------------- Single candidate, files, re-match ---------------- */
+app.get('/api/candidates/:id', h(async (req, res) => {
+  const c = await prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { ...CAND_SEL, jd: { select: { id: true, title: true, client: true } } } });
+  if (!c) throw bad('Candidate not found', 404);
+  res.json(candView(c));
+}));
+app.get('/api/candidates/:id/analysis.pdf', h(async (req, res) => {
+  const c = await prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { ...CAND_SEL, jd: { select: { title: true } } } });
+  if (!c) throw bad('Candidate not found', 404);
+  const pdf = await buildAnalysisPdf(cOut(c), c.jd?.title);
+  res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${safeName(labelOf(c), pad('CAND', c.id))}-analysis.pdf"` });
+  res.send(pdf);
+}));
+app.get('/api/candidates/:id/file', h(async (req, res) => {          // the resume exactly as it was uploaded
+  const c = await prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { file_name: true, file_type: true, file_data: true } });
+  if (!c) throw bad('Candidate not found', 404);
+  if (!c.file_data) throw bad('The original file was not stored for this resume (it was analyzed before file storage was added).', 404);
+  res.set({ 'Content-Type': MIME[c.file_type] || 'application/octet-stream', 'Content-Disposition': `attachment; filename="${safeName(c.file_name, 'resume')}"` });
+  res.send(Buffer.from(c.file_data));
+}));
+// Score an already-stored resume against another saved JD without uploading it again.
+app.post('/api/candidates/:id/rematch', h(async (req, res) => {
+  const [src, jd, settings] = await Promise.all([
+    prisma.candidate.findFirst({ where: { id: id(req), ...mine(req) }, select: { id: true, name: true, file_name: true, resume_text: true, file_type: true, file_data: true } }),
+    prisma.jd.findFirst({ where: { id: Number(req.body.jdId), ...mine(req) } }),
+    getSettings(req.user.id),
+  ]);
+  if (!src) throw bad('Candidate not found', 404);
+  if (!jd) throw bad('Select a saved JD.');
+  if (!src.resume_text) throw bad('This resume has no stored text to re-match.');
+  const dup = await prisma.candidate.findFirst({ where: { ...mine(req), jd_id: jd.id, file_name: src.file_name, ...(src.name ? { name: src.name } : {}) }, select: CAND_SEL });
+  if (dup) return res.json({ ...cOut(dup), existing: true });
+  const analysis = await analyzeResume(jd, src.resume_text);
+  analysis.required_years = requiredYears(jd, settings.min_exp);
+  const sc = score(analysis, analysis.required_years);
+  const row = await prisma.candidate.create({
+    data: { file_name: src.file_name, resume_text: src.resume_text, jd_id: jd.id, user_id: req.user.id, name: analysis.candidate || src.name, analysis, score: sc.score, req_hit: sc.req_hit, req_total: sc.req_total, file_type: src.file_type, file_data: src.file_data ?? undefined },
+    select: CAND_SEL,
+  });
+  logActivity(req.user.id, 'resume_analyzed', { entity: 'candidate', entityId: row.id, label: labelOf(row), detail: { file: row.file_name, jd_id: jd.id, jd_title: jd.title, jd_code: pad('JD', jd.id), score: row.score, req_hit: row.req_hit, req_total: row.req_total, rematch: true } });
+  res.json({ ...cOut(row), existing: false });
+}));
+
+/* ---------------- Talent search (every resume ever analyzed, any JD) ---------------- */
+app.get('/api/talent', h(async (req, res) => {
+  const { q = '', skills = '', mode = 'any', role = '', min = '', short = '' } = req.query;
+  const terms = String(skills).split(/[\n,;]+/).map(x => x.trim()).filter(Boolean).slice(0, 30);
+  const rows = await prisma.candidate.findMany({
+    where: { ...mine(req), ...(short === '1' ? { shortlisted: true } : {}), ...(Number(min) > 0 ? { score: { gte: Number(min) } } : {}) },
+    select: { id: true, name: true, file_name: true, score: true, shortlisted: true, jd_id: true, analysis: true, resume_text: true, jd: { select: { title: true } } },
+    orderBy: { id: 'desc' }, take: 3000,
+  });
+  const groups = new Map();                                   // same person analysed for several JDs -> one row
+  for (const c of rows) {
+    const key = (c.name || '').trim().toLowerCase() || (c.file_name || '').toLowerCase() || String(c.id);
+    (groups.get(key) || groups.set(key, []).get(key)).push(c);
+  }
+  const qq = String(q).trim().toLowerCase(), rr = String(role).trim().toLowerCase(), out = [];
+  for (const list of groups.values()) {
+    const best = list.reduce((a, b) => ((b.score ?? -1) > (a.score ?? -1) ? b : a));
+    const roles = [...new Set(list.map(c => c.jd?.title || pad('JD', c.jd_id)))];
+    const label = labelOf(best);
+    if (qq && ![best.name, label, best.file_name].some(v => String(v || '').toLowerCase().includes(qq))) continue;
+    if (rr && !roles.some(t => t.toLowerCase().includes(rr))) continue;
+    const found = terms.filter(t => list.some(c => hasTerm(c.resume_text, t) || (c.analysis?.skills || []).some(s => s.status === 'matched' && hasTerm(s.name, t))));
+    if (terms.length && (mode === 'all' ? found.length < terms.length : !found.length)) continue;
+    out.push({ id: best.id, name: best.name, label, file_name: best.file_name, shortlisted: list.some(c => c.shortlisted), score: best.score ?? 0, roles, hits: found.length, found });
+  }
+  out.sort((a, b) => b.hits - a.hits || b.score - a.score);
+  res.json(out.slice(0, 200));
+}));
+
+/* ---------------- Dashboard tracker: JDs vs analyzed vs shortlisted ---------------- */
+app.get('/api/tracker', h(async (req, res) => {
+  const period = ['day', 'week', 'month'].includes(req.query.period) ? req.query.period : 'week';
+  const { list, keyOf, since } = makeBuckets(period, period === 'day' ? 14 : 12);
+  const buckets = list.map(b => ({ ...b, jds: 0, analyzed: 0, shortlisted: 0 })), by = new Map(buckets.map(b => [b.key, b]));
+  const bump = (d, f) => { const b = by.get(keyOf(d)); if (b) b[f]++; };
+  const [jdRows, candRows, shortRows, jdList, perJd] = await Promise.all([
+    prisma.jd.findMany({ where: { ...mine(req), created_at: { gte: since } }, select: { created_at: true } }),
+    prisma.candidate.findMany({ where: { ...mine(req), created_at: { gte: since } }, select: { created_at: true } }),
+    prisma.candidate.findMany({ where: { ...mine(req), shortlisted: true }, select: { id: true, name: true, score: true, jd_id: true, shortlisted_at: true, created_at: true, jd: { select: { title: true } } }, orderBy: [{ shortlisted_at: 'desc' }, { id: 'desc' }] }),
+    prisma.jd.findMany({ where: mine(req), select: { id: true, title: true } }),
+    prisma.candidate.groupBy({ by: ['jd_id', 'shortlisted'], where: mine(req), _count: { _all: true } }),
+  ]);
+  jdRows.forEach(r => bump(r.created_at, 'jds'));
+  candRows.forEach(r => bump(r.created_at, 'analyzed'));
+  shortRows.forEach(r => { const d = r.shortlisted_at || r.created_at; if (d >= since) bump(d, 'shortlisted'); });
+  const roles = jdList.map(j => {
+    const rows = perJd.filter(g => g.jd_id === j.id);
+    return { id: j.id, title: j.title, code: pad('JD', j.id), analyzed: rows.reduce((n, g) => n + g._count._all, 0), shortlisted: rows.filter(g => g.shortlisted).reduce((n, g) => n + g._count._all, 0) };
+  }).sort((a, b) => b.shortlisted - a.shortlisted || b.analyzed - a.analyzed);
+  const shortlisted = shortRows.map(r => ({ id: r.id, label: labelOf(r), name: r.name, score: r.score, job_role: r.jd?.title || null, jd_code: pad('JD', r.jd_id), shortlisted_at: r.shortlisted_at, created_at: r.created_at }));
+  res.json({ period, buckets, roles, shortlisted });
+}));
+
+/* ---------------- Saved searches (named filter sets per panel) ---------------- */
+app.get('/api/searches', h(async (req, res) => {
+  res.json(await prisma.savedSearch.findMany({ where: { ...mine(req), scope: String(req.query.scope || '') }, select: { id: true, scope: true, name: true, query: true }, orderBy: { id: 'asc' } }));
+}));
+app.post('/api/searches', h(async (req, res) => {
+  const scope = String(req.body.scope || ''), name = String(req.body.name || '').trim().slice(0, 60);
+  if (!/^[a-z]{1,24}$/.test(scope)) throw bad('Invalid search scope.');
+  if (!name) throw bad('Give the search a name.');
+  const query = req.body.query && typeof req.body.query === 'object' && !Array.isArray(req.body.query) ? req.body.query : {};
+  res.json(await prisma.savedSearch.create({ data: { user_id: req.user.id, scope, name, query }, select: { id: true, scope: true, name: true, query: true } }));
+}));
+app.delete('/api/searches/:id', h(async (req, res) => {
+  await prisma.savedSearch.deleteMany({ where: { id: id(req), ...mine(req) } });
+  res.json({ ok: true });
 }));
 
 /* ---------------- Masking ---------------- */
@@ -335,30 +380,6 @@ app.get('/api/stats', h(async (req, res) => {
     prisma.jd.findMany({ where: mine(req), select: sel(['id', 'title', 'employment_type', 'location', 'created_at']), orderBy: { id: 'desc' }, take: 5 }),
   ]);
   res.json({ resumes, jds, masked, mask_failed, shortlisted, recent_candidates: rc.map(cOut), recent_jds: rj.map(jdOut) });
-}));
-
-// Dashboard: shortlisted profiles (with job role) + JD vs shortlisted tracker (daily / weekly / monthly) + per-role breakdown.
-const PERIODS = { day: 14, week: 12, month: 12 };
-app.get('/api/tracker', h(async (req, res) => {
-  const period = PERIODS[req.query.period] ? req.query.period : 'week';
-  const buckets = periodList(period, PERIODS[period]).map(b => ({ ...b, jds: 0, analyzed: 0, shortlisted: 0 }));
-  const since = new Date(Date.now() - (period === 'day' ? 15 : period === 'week' ? 7 * 13 : 31 * 13) * 864e5);
-  const [jds, cands, short, roles] = await Promise.all([
-    prisma.jd.findMany({ where: { ...mine(req), created_at: { gte: since } }, select: { created_at: true } }),
-    prisma.candidate.findMany({ where: { ...mine(req), created_at: { gte: since } }, select: { created_at: true } }),
-    prisma.candidate.findMany({ where: { ...mine(req), shortlisted: true }, select: { ...sel(['id', 'name', 'file_name', 'score', 'req_hit', 'req_total', 'jd_id', 'shortlisted_at', 'created_at']), jd: { select: { id: true, title: true, client: true } } }, orderBy: [{ shortlisted_at: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }] }),
-    prisma.jd.findMany({ where: mine(req), select: { id: true, title: true, created_at: true, _count: { select: { candidates: true } } }, orderBy: { id: 'desc' } }),
-  ]);
-  const byKey = new Map(buckets.map(b => [b.key, b]));
-  const put = (d, f) => { const b = byKey.get(periodKey(d.getTime(), period)); if (b) b[f]++; };
-  jds.forEach(j => put(j.created_at, 'jds')); cands.forEach(c => put(c.created_at, 'analyzed'));
-  short.forEach(c => put(c.shortlisted_at || c.created_at, 'shortlisted'));
-  const perRole = new Map(); short.forEach(c => perRole.set(c.jd_id, (perRole.get(c.jd_id) || 0) + 1));
-  res.json({
-    period, tz: TIMEZONE, buckets,
-    shortlisted: short.map(c => ({ ...cOut(c), jd: undefined, job_role: c.jd?.title || null, jd_code: pad('JD', c.jd_id), client: c.jd?.client || null })),
-    roles: roles.map(j => ({ id: j.id, code: pad('JD', j.id), title: j.title, created_at: j.created_at, analyzed: j._count.candidates, shortlisted: perRole.get(j.id) || 0 })),
-  });
 }));
 // NOTE: the self-service "Delete all data" endpoint was removed. Complete deletion is now an Admin Panel action (src/admin.js).
 

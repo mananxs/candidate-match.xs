@@ -55,9 +55,9 @@ const offsetAt = ms => { const p = parts(ms); return Date.UTC(+p.year, +p.month 
 const iso = d => d.toISOString().slice(0, 10);
 const ymd = s => s.split('-').map(Number);
 export const addDays = (s, n) => { const [y, m, d] = ymd(s); return iso(new Date(Date.UTC(y, m - 1, d + n))); };
-const addMonths = (s, n) => { const [y, m] = ymd(s); return iso(new Date(Date.UTC(y, m - 1 + n, 1))); };
-const weekStart = s => { const [y, m, d] = ymd(s); return addDays(s, -((new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7)); };   // Monday
-const monthStart = s => s.slice(0, 8) + '01';
+export const addMonths = (s, n) => { const [y, m] = ymd(s); return iso(new Date(Date.UTC(y, m - 1 + n, 1))); };
+export const weekStart = s => { const [y, m, d] = ymd(s); return addDays(s, -((new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7)); };   // Monday
+export const monthStart = s => s.slice(0, 8) + '01';
 /** 'YYYY-MM-DD' (local) -> UTC milliseconds of that local midnight */
 export function dayStart(s) {
   const [y, m, d] = ymd(s), guess = Date.UTC(y, m - 1, d);
@@ -75,22 +75,16 @@ export function rangeWhere(from, to) {
   return Object.keys(w).length ? { created_at: w } : {};
 }
 
-/** Empty daily / weekly (Mon-Sun) / monthly periods, newest first: [{ key, from, to }] in local dates. */
-export function periodList(period, count) {
-  const today = localDate(Date.now()), list = [];
-  const first = { day: s => s, week: weekStart, month: monthStart }[period] || weekStart;
-  const step = { day: (s, n) => addDays(s, n), week: (s, n) => addDays(s, 7 * n), month: addMonths }[period] || ((s, n) => addDays(s, 7 * n));
-  let start = first(today);
-  for (let i = 0; i < count; i++) { list.push({ key: start, from: start, to: addDays(step(start, 1), -1) }); start = step(start, -1); }
-  return list;
-}
-/** Key of the period a timestamp falls in (matches periodList keys). */
-export const periodKey = (ms, period) => { const d = localDate(ms); return period === 'day' ? d : period === 'month' ? monthStart(d) : weekStart(d); };
-
 /** Weekly (Mon-Sun) or monthly buckets, newest first, empty periods included. */
 export async function buildReport(userId, period, count) {
-  const wk = period === 'week';
-  const list = periodList(wk ? 'week' : 'month', count).map(b => ({ ...b, counts: emptyCounts() }));
+  const wk = period === 'week', step = wk ? 7 : 1, today = localDate(Date.now());
+  let start = wk ? weekStart(today) : monthStart(today);
+  const list = [];
+  for (let i = 0; i < count; i++) {
+    const next = wk ? addDays(start, 7) : addMonths(start, 1);
+    list.push({ key: start, from: start, to: addDays(next, -1), counts: emptyCounts() });
+    start = wk ? addDays(start, -7) : addMonths(start, -1);
+  }
   const byKey = new Map(list.map(b => [b.key, b]));
   const rows = await prisma.activityLog.findMany({
     where: { user_id: userId, created_at: { gte: new Date(dayStart(list[list.length - 1].from)) } },
@@ -102,4 +96,18 @@ export async function buildReport(userId, period, count) {
     if (b) addCount(b.counts, r.action);
   }
   return list;
+}
+
+/** Day / week (Mon-Sun) / month buckets, NEWEST FIRST, plus a function mapping a Date to its bucket key (local time zone). */
+export function makeBuckets(period, count) {
+  const today = localDate(Date.now());
+  const startOf = period === 'month' ? monthStart : period === 'week' ? weekStart : (x => x);
+  const nextOf = (st, dir) => period === 'month' ? addMonths(st, dir) : addDays(st, dir * (period === 'week' ? 7 : 1));
+  let st = startOf(today);
+  const list = [];
+  for (let i = 0; i < count; i++) {
+    list.push({ key: st, from: st, to: addDays(nextOf(st, 1), -1) });
+    st = nextOf(st, -1);
+  }
+  return { list, keyOf: d => startOf(localDate(new Date(d).getTime())), since: new Date(dayStart(list[list.length - 1].from)) };
 }
