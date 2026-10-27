@@ -29,13 +29,23 @@ function initGoogle(clientId) {
   if (!window.google?.accounts?.id) return setTimeout(() => initGoogle(clientId), 150);
   google.accounts.id.initialize({ client_id: clientId, callback: onCredential, ux_mode: 'popup' });
   ['#gHero', '#gBottom'].forEach(s => google.accounts.id.renderButton($(s), { theme: 'filled_black', size: 'large', shape: 'rectangular', text: 'continue_with', logo_alignment: 'left', width: 280 }));
+  // Header "Sign in": an invisible Google button covers it, so one click opens the Google account chooser directly
+  google.accounts.id.renderButton($('#gNav'), { theme: 'filled_black', size: 'large', shape: 'rectangular', text: 'signin', width: 200 });
+  googleReady = true;
 }
+let googleReady = false;
+// Fallback (overlay not rendered yet / blocked): ask Google for its account prompt instead of only scrolling down.
+$('#navCta').addEventListener('click', e => {
+  if (!googleReady || $('#navCta').getAttribute('href') !== '#signin') return;
+  e.preventDefault();
+  google.accounts.id.prompt(n => { if (n.isNotDisplayed?.() || n.isSkippedMoment?.()) $('#signin').scrollIntoView({ behavior: 'smooth' }); });
+});
 
 (async () => {
   // Already signed in? Offer a direct link to the dashboard.
   const me = await fetch('/api/me').then(r => r.ok ? r.json() : null).catch(() => null);
   if (me) {
-    $('#openApp').hidden = false; $('#gHero').hidden = true; $('#gBottom').hidden = true;
+    $('#openApp').hidden = false; $('#gHero').hidden = true; $('#gBottom').hidden = true; $('#gNav').hidden = true;
     $('#navCta').textContent = 'Open dashboard'; $('#navCta').href = '/app';
     say(`Signed in as ${me.email}`);
     return;

@@ -81,8 +81,9 @@
   function fillScore(card) {
     const ring = card.querySelector('.ring');
     if (ring) play(ring, [{ '--p': 0 }, { '--p': parseFloat(ring.style.getPropertyValue('--p')) || 0 }], { duration: 1100, delay: 150, easing: EASE, fill: 'backwards' });
-    const bar = card.querySelector('.bar i');
-    if (bar && bar.style.width) play(bar, [{ width: '0%' }, { width: bar.style.width }], { duration: 1000, delay: 250, easing: EASE, fill: 'backwards' });
+    card.querySelectorAll('.bar i, .meter i').forEach((bar, i) => {
+      if (bar.style.width) play(bar, [{ width: '0%' }, { width: bar.style.width }], { duration: 1000, delay: 250 + i * 90, easing: EASE, fill: 'backwards' });
+    });
   }
 
   /* ---------- 4. workspace + admin pages (app.js and admin.js re-render #main with innerHTML) ----------
