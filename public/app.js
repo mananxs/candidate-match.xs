@@ -104,14 +104,20 @@ function reqForm(jd) {
   <div class="g3">${FIELDS.map(fld).join('')}</div><div class="grid" style="margin-top:12px">${AREAS.map(area).join('')}</div>
   <div class="row"><button data-act="savejd" ${M.busy ? 'disabled' : ''}>Save requirements</button>${jd.status === 'draft' ? '<span class="meta">Not saved yet</span>' : '<span class="tag ok">Saved</span>'}</div></div>`;
 }
+// Reads one form field. List fields (skills, responsibilities...) become arrays.
+function readField(el) {
+  const k = el.dataset.f, v = el.value;
+  if (!AR.has(k)) return v;
+  const sep = AREAS.find(a => a[0] === k)[2];
+  return v.split(sep === ',' ? /[\n,;]+/ : /\n+/).map(x => x.trim()).filter(Boolean);
+}
 function collectForm() {
   const o = {};
-  document.querySelectorAll('[data-f]').forEach(el => {
-    const k = el.dataset.f, v = el.value;
-    o[k] = AR.has(k) ? v.split(AREAS.find(a => a[0] === k)[2] === ',' ? /[\n,;]+/ : /\n+/).map(x => x.trim()).filter(Boolean) : v;
-  });
+  document.querySelectorAll('[data-f]').forEach(el => { o[el.dataset.f] = readField(el); });
   return o;
 }
+// Keep M.jd equal to what is typed, so a re-render (draw) never throws the user's edits away.
+function syncField(el) { if (M.jd && el.dataset.f) M.jd[el.dataset.f] = readField(el); }
 const missingOf = jd => [...FIELDS.filter(f => f[0] !== 'client').map(f => f[0]).filter(k => jd[k] == null || jd[k] === ''), ...AREAS.map(a => a[0]).filter(k => k !== 'hands_on' && !(jd[k] || []).length)];   // hands-on is optional
 
 /* ---------- views ---------- */
@@ -285,6 +291,14 @@ async function extractJd(file, text) {
     M.jd = jd; M.prog = null; M.missing = missingOf(jd); JDS = [{ ...jd, cand_count: 0 }, ...JDS.filter(j => j.id !== jd.id)];
   });
 }
+/* A JD was deleted: remove it (and its candidates) from the list, the Analyze Match screen and the selections. */
+function forgetJd(jdId) {
+  JDS = JDS.filter(j => j.id !== jdId);
+  CANDS = CANDS.filter(c => c.jd_id !== jdId);
+  SEL = new Set([...SEL].filter(i => CANDS.some(c => c.id === i)));
+  M.results = M.results.filter(c => c.jd_id !== jdId);
+  if (M.jd?.id === jdId) { M.jd = null; M.missing = []; M.text = ''; M.files = []; M.prog = null; M.err = ''; }
+}
 async function maskOne(id) {
   const c = await api(`/candidates/${id}/mask`, { method: 'POST' });
   const i = CANDS.findIndex(x => x.id === id); if (i > -1) CANDS[i] = c;
@@ -387,7 +401,14 @@ document.addEventListener('click', async e => {
   if (a === 'uplogo') { pick = 'logo'; $('#fi').multiple = false; $('#fi').accept = '.png,.jpg,.jpeg'; return $('#fi').click(); }
   if (a === 'reset') { M.files = []; M.results = []; M.err = ''; M.prog = null; return draw(); }
   if (a === 'extract') { if ((M.text || '').trim().length < 40) { M.err = 'Paste or upload a JD first'; return draw(); } return extractJd(null, M.text); }
-  if (a === 'savejd') return busy('Saving requirements…', async () => { const jd = await send(`/jds/${M.jd.id}`, collectForm(), 'PUT'); M.jd = jd; M.missing = []; JDS = JDS.map(j => j.id === jd.id ? { ...j, ...jd, cand_count: j.cand_count } : j); });
+  if (a === 'savejd') {
+    const form = collectForm();   // read the typed values FIRST - busy() redraws the form from old data
+    return busy('Saving requirements…', async () => {
+      const jd = await send(`/jds/${M.jd.id}`, form, 'PUT');
+      M.jd = jd; M.missing = [];
+      JDS = JDS.map(j => j.id === jd.id ? { ...j, ...jd, cand_count: j.cand_count } : j);
+    });
+  }
   if (a === 'analyze') {
     if (!M.jd) { M.err = 'Select or extract a JD first'; return draw(); }
     if (M.jd.status !== 'saved') { M.err = 'Click "Save requirements" first so the JD is locked in.'; return draw(); }
@@ -403,14 +424,14 @@ document.addEventListener('click', async e => {
     M.busy = ''; M.files = []; return draw();
   }
   if (a === 'matchjd' || a === 'edjd') { M.jd = await api('/jds/' + id); M.missing = M.jd.status === 'draft' ? missingOf(M.jd) : []; M.results = []; return go('match'); }
-  if (a === 'deljd') { if (confirm('Delete this JD and its candidates?')) { await api('/jds/' + id, { method: 'DELETE' }); if (M.jd?.id === id) M.jd = null; return go('jds'); } return; }
+  if (a === 'deljd') { if (confirm('Delete this JD and its candidates?')) { await api('/jds/' + id, { method: 'DELETE' }); forgetJd(id); return go('jds'); } return; }
   if (a === 'logout') { await api('/auth/logout', { method: 'POST' }); location.href = '/'; return; }
   if (a === 'rmjd') {
     if (!M.jd) return;
     const n = jdOf(M.jd.id)?.cand_count || 0;
     if (!confirm(`Remove ${M.jd.code}${n ? ` and its ${n} candidate${n > 1 ? 's' : ''}` : ''}? This cannot be undone.`)) return;
     const gone = M.jd.id;
-    return busy('Removing JD…', async () => { await api('/jds/' + gone, { method: 'DELETE' }); M.jd = null; M.missing = []; M.results = []; M.text = ''; JDS = await api('/jds'); });
+    return busy('Removing JD…', async () => { await api('/jds/' + gone, { method: 'DELETE' }); forgetJd(gone); JDS = await api('/jds'); });
   }
   if (a === 'selall') { if (e.target.checked) procRows().forEach(c => SEL.add(c.id)); else SEL.clear(); return draw(); }
   if (a === 'delsel') {
@@ -479,6 +500,7 @@ document.addEventListener('input', e => {
   if (t.id === 'mt' && $('#cmpwrap') && !$('#cmpwrap').hidden) { clearTimeout(_cmpT); _cmpT = setTimeout(drawCompare, 250); }
   if (t.dataset.in) M[t.dataset.in] = t.value;
   if (t.dataset.hide !== undefined || t.id === 's_wm' || t.id === 's_min') { const n = $('#setnote'); if (n) n.hidden = true; }
+  if (t.dataset.f) syncField(t);
   if (t.dataset.f) { const empty = t.value === ''; t.classList.toggle('miss', empty && M.missing.includes(t.dataset.f)); }
 });
 document.addEventListener('change', async e => {
@@ -494,6 +516,7 @@ document.addEventListener('change', async e => {
     catch (x) { toast(x.message, true); }
     t.disabled = false; t.value = ''; return;
   }
+  if (t.dataset.f) syncField(t);
   if (t.dataset.f && t.tagName === 'SELECT') t.classList.toggle('miss', t.value === '' && M.missing.includes(t.dataset.f));
 });
 // Boot: confirm who is signed in, then open the dashboard.
